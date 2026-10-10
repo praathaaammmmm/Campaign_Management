@@ -6,7 +6,10 @@ os.environ["CLINIC_USERNAME"] = "smritiraj-clinic"
 os.environ["CLINIC_PASSWORD_HASH"] = PasswordHasher().hash("test-password")
 os.environ["SESSION_SECRET_KEY"] = "test-session-secret-that-is-long-enough"
 os.environ["SESSION_HTTPS_ONLY"] = "false"
-os.environ["DATABASE_URL"] = "sqlite:///./test_smritiraj.db"
+# SQLite by default. Set TEST_DATABASE_URL to a scratch PostgreSQL database (never a real
+# one: every test drops and recreates all tables) to run the suite, including the
+# PostgreSQL-only concurrency tests, against Postgres.
+os.environ["DATABASE_URL"] = os.getenv("TEST_DATABASE_URL", "sqlite:///./test_smritiraj.db")
 os.environ["ALLOWED_HOSTS"] = "testserver"
 os.environ["N8N_WEBHOOK_SECRET"] = "test-n8n-webhook-secret"
 from fastapi.testclient import TestClient

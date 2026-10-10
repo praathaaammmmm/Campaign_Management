@@ -11,7 +11,7 @@ import hmac
 import re
 import secrets
 from datetime import datetime, timedelta
-from pathlib import Path
+from io import BytesIO
 
 import qrcode
 from sqlalchemy import select, update
@@ -43,21 +43,25 @@ def qr_payload(token: str) -> str:
     return token
 
 
-def generate_qr(token: str, coupon_uid: str) -> Path:
-    img = qrcode.make(qr_payload(token))
-    path = QR_DIR / f"{coupon_uid}.png"
-    img.save(path)
-    return path
+def qr_png_bytes(coupon_uid: str, expected_hash: str) -> bytes:
+    """Build a coupon's QR PNG in memory. The database row is the record; the image is
+    derived from the coupon ID and ``QR_SIGNING_KEY`` on demand and never stored.
 
-
-def ensure_qr(coupon_uid: str, expected_hash: str) -> Path:
-    path = QR_DIR / f"{coupon_uid}.png"
-    if not path.exists():
-        token = token_for(coupon_uid)
-        if not hmac.compare_digest(token_hash(token), expected_hash):
-            raise FileNotFoundError("Legacy QR cannot be regenerated; issue a replacement coupon")
-        generate_qr(token, coupon_uid)
-    return path
+    The regenerated token must hash to the stored ``secure_token_hash`` -- otherwise this
+    is a legacy coupon (issued with a random token before hashed tokens) or the signing
+    key has changed, and a regenerated image would be a QR that fails validation. For
+    those, a PNG already present in ``QR_DIR`` is served read-only; with none, the
+    caller gets ``FileNotFoundError`` and shows its "QR unavailable" state.
+    """
+    token = token_for(coupon_uid)
+    if hmac.compare_digest(token_hash(token), expected_hash):
+        buffer = BytesIO()
+        qrcode.make(qr_payload(token)).save(buffer, format="PNG")
+        return buffer.getvalue()
+    legacy_path = QR_DIR / f"{coupon_uid}.png"
+    if legacy_path.is_file():
+        return legacy_path.read_bytes()
+    raise FileNotFoundError("Legacy QR cannot be regenerated; issue a replacement coupon")
 
 
 def find_coupon(db: Session, token: str) -> PatientOffer | None:

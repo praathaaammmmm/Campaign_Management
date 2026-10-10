@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Form, Query, Request
@@ -13,12 +14,13 @@ from ..models import AuditLog, Campaign, Offer, Patient, PatientOffer
 from ..config import VALIDATION_RATE_LIMIT_ATTEMPTS, VALIDATION_RATE_LIMIT_WINDOW_SECONDS
 from ..security import client_key, is_rate_limited, record_rate_limit_event, require_csrf
 from ..registrations.service import (
-    RegistrationError, latest_coupon_for, register_patient_offer,
-    registration_form_options, resend_patient_delivery,
+    RecentDuplicateError, RegistrationError, latest_coupon_for, register_patient_offer,
+    registration_form_options, registration_form_retry, resend_patient_delivery,
 )
 from ..time_utils import clinic_date_range_to_utc, utc_now
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _context(request: Request, **values):
@@ -74,28 +76,41 @@ def register_patient(
     age: str = Form(""), gender: str = Form(""), city: str = Form(""), doctor_name: str = Form(""),
     campaign_name: str = Form(""), campaign_id: int | None = Form(None), offer_id: int = Form(...),
     beneficiary_category: str = Form(""),
-    consent_given: bool = Form(False), _csrf: None = Depends(require_csrf),
+    consent_given: bool = Form(False), submission_token: str = Form(""),
+    confirm_repeat: bool = Form(False), _csrf: None = Depends(require_csrf),
 ):
     guard = require_staff(request)
     if guard:
         return guard
     db = request.app.state.db()
     try:
+        duplicate = None
         try:
             coupon = register_patient_offer(
                 db, full_name=full_name, mobile=mobile, email=email, age=age, gender=gender, city=city,
                 doctor_name=doctor_name, campaign_name=campaign_name, campaign_id=campaign_id, offer_id=offer_id,
                 beneficiary_category=beneficiary_category, consent_given=consent_given, actor=request.session["user"],
+                submission_key=submission_token, confirm_repeat=confirm_repeat,
             )
             return RedirectResponse(f"/staff/patients/{coupon.patient_id}", status_code=303)
+        except RecentDuplicateError as exc:
+            duplicate, error, status_code = exc.recent, None, 409
         except RegistrationError as exc:
             error, status_code = str(exc), 422
         except Exception:
+            logger.exception("Staff patient registration failed")
             db.rollback()
             error, status_code = "Registration could not be completed. Please try again.", 500
+        submitted = {
+            "full_name": full_name, "mobile": mobile, "email": email, "age": age, "gender": gender,
+            "city": city, "doctor_name": doctor_name, "campaign_name": campaign_name,
+            "campaign_id": campaign_id, "offer_id": offer_id, "consent_given": consent_given,
+        }
+        options = registration_form_options(db, campaigns=_active_campaigns(db))
+        options.update(registration_form_retry(submitted, submission_token, duplicate))
         return request.app.state.templates.TemplateResponse(request, "register.html", _context(
-            request, **registration_form_options(db, campaigns=_active_campaigns(db)), error=error,
-            form_action="/staff/register", back_url="/staff/home",
+            request, **options, error=error,
+            form_action="/staff/register", back_url="/staff/home", detail_prefix="/staff/patients",
             beneficiary_categories=SELECTABLE_CATEGORIES, selected_category=beneficiary_category,
         ), status_code=status_code)
     finally:

@@ -15,15 +15,14 @@ def test_static_frontend_assets_are_served(client):
 
 
 def test_authenticated_pages_share_integrated_layout(client):
-    # The decorative custom-cursor effect and the top-header's diamond/help/avatar
-    # icons are login-page-only flourishes; the authenticated CRM chrome deliberately
-    # drops them (kept: sidebar navigation, sign-out, section title).
+    # The custom cursor is shown on authenticated pages as well as the login page; the
+    # top-header's diamond/help/avatar icons stay login-page-only.
     for path in ("/", "/patients", "/patients/register", "/offers", "/validate", "/redemptions", "/delivery"):
         response = client.get(path)
         assert response.status_code == 200
         assert "Dentistry Ops" in response.text
-        assert "/static/cursor.js" not in response.text
-        assert "/static/cursor.css" not in response.text
+        assert "/static/cursor.js" in response.text
+        assert "/static/cursor.css" in response.text
         assert '/static/img/nabh-accredited.png' in response.text
         assert 'alt="NABH Accredited – Patient Safety &amp; Quality of Care"' in response.text
 

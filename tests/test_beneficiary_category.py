@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+from sqlalchemy import inspect
+
 from app.database import SessionLocal, engine
 from app.models import PatientOffer
 from app.reporting.service import registrations_by_category
@@ -14,10 +16,11 @@ def _register(client, name, mobile, category="CGHS", path="/patients/register"):
     }, follow_redirects=False)
 
 
-def test_migration_backfills_beneficiary_category_column_on_sqlite(client):
-    with engine.connect() as connection:
-        columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(patient_offers)")}
+def test_beneficiary_category_column_exists_and_is_required(client):
+    # Dialect-neutral (SQLite and PostgreSQL) replacement for a raw PRAGMA table_info check.
+    columns = {column["name"]: column for column in inspect(engine).get_columns("patient_offers")}
     assert "beneficiary_category" in columns
+    assert columns["beneficiary_category"]["nullable"] is False
 
 
 def test_valid_category_persists_through_staff_registration(client):

@@ -2,7 +2,7 @@ from datetime import timedelta
 from app.database import Base, engine, SessionLocal
 from app.time_utils import utc_now
 from app.models import Patient, Offer, PatientOffer
-from app.qr.service import new_uid, expiry_for, generate_qr, token_for, token_hash
+from app.qr.service import new_uid, expiry_for, token_for, token_hash
 
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
@@ -16,7 +16,7 @@ try:
         db.add(p); db.flush()
         uid = new_uid("SRD"); token = token_for(uid)
         c = PatientOffer(coupon_uid=uid, patient_id=p.id, offer_id=offer.id, secure_token_hash=token_hash(token), created_at=now, expires_at=expiry_for(now), status="ACTIVE", beneficiary_category=category)
-        db.add(c); db.flush(); generate_qr(token, c.coupon_uid)
+        db.add(c); db.flush()
     db.commit()
     print("Development seed complete: Rahul Sharma, Amit Kumar, Neha Singh")
 finally:

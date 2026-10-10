@@ -52,10 +52,12 @@ def test_consent_is_required(client):
     r = client.post("/patients/register", data=registration("No Consent", "9999999981", consent=""))
     assert r.status_code == 422 and "consent is required" in r.text
 
-def test_duplicate_mobile_is_rejected_in_same_campaign_week(client):
-    client.post("/patients/register", data=registration("First", "9999999982"))
-    r = client.post("/patients/register", data=registration("Second", "9999999982"), follow_redirects=False)
-    assert r.status_code == 422 and "already registered" in r.text
+def test_same_mobile_can_register_again_in_same_campaign_week(client):
+    client.post("/patients/register", data=registration("First", "9999999982", offer="1"))
+    r = client.post("/patients/register", data=registration("Second", "9999999982", offer="2"), follow_redirects=False)
+    assert r.status_code == 303
+    db = SessionLocal(); rows = db.query(PatientOffer).order_by(PatientOffer.id).all(); db.close()
+    assert len(rows) == 2 and rows[0].patient_id != rows[1].patient_id
 
 def test_token_never_appears_in_url_or_database(client):
     client.post("/patients/register", data=registration("Private Token", "9999999983"))

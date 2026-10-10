@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from ..auth import require_admin, require_staff_or_admin
 from ..models import PatientOffer
-from .service import ensure_qr
+from .service import qr_png_bytes
 
 router = APIRouter()
 
@@ -19,10 +19,10 @@ def qr_image(request: Request, coupon_uid: str):
     if not coupon:
         return RedirectResponse("/offers", status_code=303)
     try:
-        path = ensure_qr(coupon_uid, coupon.secure_token_hash)
+        image = qr_png_bytes(coupon.coupon_uid, coupon.secure_token_hash)
     except FileNotFoundError:
         return RedirectResponse(f"/patients/{coupon.patient_id}?message=QR file unavailable", status_code=303)
-    return FileResponse(path, media_type="image/png", filename=path.name)
+    return Response(image, media_type="image/png", headers={"Content-Disposition": f'inline; filename="{coupon.coupon_uid}.png"'})
 
 
 @router.get("/qr/{coupon_uid}/download")
@@ -37,10 +37,10 @@ def qr_download(request: Request, coupon_uid: str):
     if not coupon:
         return RedirectResponse("/offers", status_code=303)
     try:
-        path = ensure_qr(coupon_uid, coupon.secure_token_hash)
+        image = qr_png_bytes(coupon.coupon_uid, coupon.secure_token_hash)
     except FileNotFoundError:
         return RedirectResponse(f"/patients/{coupon.patient_id}?message=QR file unavailable", status_code=303)
-    return FileResponse(path, media_type="image/png", filename=f"{coupon_uid}.png", headers={"Content-Disposition": f'attachment; filename="{coupon_uid}.png"'})
+    return Response(image, media_type="image/png", headers={"Content-Disposition": f'attachment; filename="{coupon.coupon_uid}.png"'})
 
 
 @router.get("/qr/{coupon_uid}/print")

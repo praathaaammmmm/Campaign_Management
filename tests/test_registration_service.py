@@ -2,7 +2,7 @@ import pytest
 
 from app.database import SessionLocal
 from app.models import AuditLog, PatientOffer
-from app.registrations.service import DuplicateRegistrationError, register_patient_offer
+from app.registrations.service import RecentDuplicateError, register_patient_offer
 
 
 def _register(db, mobile="9999999977"):
@@ -35,11 +35,14 @@ def test_service_creates_legacy_patient_offer_and_audit(client):
         db.close()
 
 
-def test_service_preserves_weekly_duplicate_rule(client):
+def test_service_asks_before_repeating_a_recent_registration(client):
     db = SessionLocal()
     try:
-        _register(db, mobile="9999999976")
-        with pytest.raises(DuplicateRegistrationError):
+        first = _register(db, mobile="9999999976")
+        with pytest.raises(RecentDuplicateError) as raised:
             _register(db, mobile="9999999976")
+        assert raised.value.recent.coupon_uid == first.coupon_uid
+        assert raised.value.recent.issued_by == "admin"
+        assert db.query(PatientOffer).count() == 1
     finally:
         db.close()

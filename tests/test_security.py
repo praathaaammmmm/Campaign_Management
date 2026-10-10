@@ -90,7 +90,7 @@ def test_registration_does_not_expose_internal_error(client, monkeypatch):
     def fail_generation(*_args, **_kwargs):
         raise RuntimeError("SECRET INTERNAL FAILURE")
 
-    monkeypatch.setattr(registration_service, "generate_qr", fail_generation)
+    monkeypatch.setattr(registration_service, "queue_registration_deliveries", fail_generation)
     response = client.post(
         "/patients/register",
         data={"full_name": "Test Patient", "mobile": "9999999999", "campaign_id": "1", "offer_id": "1", "beneficiary_category": "CGHS", "consent_given": "true"},

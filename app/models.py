@@ -25,10 +25,6 @@ class Patient(Base):
 
     offers = relationship("PatientOffer", back_populates="patient", cascade="all, delete-orphan")
 
-    __table_args__ = (
-        UniqueConstraint("mobile", "registration_week", name="uq_patient_mobile_registration_week"),
-    )
-
 class StaffUser(Base):
     __tablename__ = "staff_users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -84,6 +80,7 @@ class PatientOffer(Base):
     cancelled_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cancellation_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     beneficiary_category: Mapped[str] = mapped_column(String(20), index=True)
+    submission_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     patient = relationship("Patient", back_populates="offers")
     offer = relationship("Offer", back_populates="patient_offers")
@@ -91,6 +88,7 @@ class PatientOffer(Base):
 
     __table_args__ = (
         Index("ix_patient_offers_status_expiry", "status", "expires_at"),
+        Index("ux_patient_offers_submission_key", "submission_key", unique=True),
         CheckConstraint(
             "beneficiary_category IN (" + ", ".join(f"'{value}'" for value in sorted(ALL_VALUES)) + ")",
             name="ck_patient_offers_beneficiary_category",

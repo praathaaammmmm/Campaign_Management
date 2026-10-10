@@ -17,10 +17,11 @@ from sqlalchemy.orm import Session
 from ..audit_service import audit
 from ..config import (
     DELIVERY_STALE_SENDING_SECONDS, HOSPITAL_NAME, N8N_CALLBACK_BASE_URL,
-    N8N_DELIVERY_MAX_RETRIES, N8N_WEBHOOK_URL, QR_DIR,
+    N8N_DELIVERY_MAX_RETRIES, N8N_WEBHOOK_URL,
 )
 from ..models import DeliveryLog, Patient, PatientOffer
 from .n8n import trigger_delivery
+from ..qr.service import qr_png_bytes
 from ..time_utils import utc_now
 
 CALLBACK_PATH = "/webhooks/n8n/delivery"
@@ -99,8 +100,12 @@ def send_qr_delivery(db: Session, patient: Patient, coupon: PatientOffer, channe
 def _payload_for(db: Session, row: DeliveryLog) -> dict:
     coupon = db.get(PatientOffer, row.coupon_id)
     patient = coupon.patient
-    qr_path = QR_DIR / f"{coupon.coupon_uid}.png"
-    qr_b64 = base64.b64encode(qr_path.read_bytes()).decode("ascii") if qr_path.exists() else None
+    # Generated on demand, never read from a per-registration file: the dispatcher may run
+    # in a different container from the web app, with no shared disk.
+    try:
+        qr_b64 = base64.b64encode(qr_png_bytes(coupon.coupon_uid, coupon.secure_token_hash)).decode("ascii")
+    except FileNotFoundError:
+        qr_b64 = None
     event = "REGISTRATION_QR_DELIVERY" if row.attempt_number == 1 else "REGISTRATION_QR_DELIVERY_RETRY"
     return {
         "event": event,

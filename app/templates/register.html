@@ -2,23 +2,25 @@
 {% block content %}
 <div class="page-head"><div><span class="eyebrow">{{ 'STAFF · NEW REGISTRATION' if workspace == 'staff' else 'CRM · NEW PATIENT' }}</span><h1>Add patient</h1><p class="muted">Capture the patient profile, choose a service, and generate a secure one-time QR offer.</p></div><a class="text-link" href="{{ back_url|default('/patients') }}">← Back</a></div>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
-<form class="registration-layout form" method="post" action="{{ form_action|default('/patients/register') }}">
+{% if duplicate %}<section class="duplicate-warning" role="alert"><h2>This QR was issued a few minutes ago</h2><p>A registration for the same mobile number, campaign and service already exists. No new QR has been issued yet.</p><dl><dt>QR ID</dt><dd>{{ duplicate.coupon_uid }}</dd><dt>Issued</dt><dd>{{ duplicate.created_at|clinic_time('%d %b %Y, %I:%M %p') }} IST</dd><dt>Issued by</dt><dd>{{ duplicate.issued_by or '—' }}</dd></dl><div class="actions"><button class="primary btn" type="submit" form="registration-form" name="confirm_repeat" value="true">Issue another QR</button><a class="btn secondary" href="{{ detail_prefix|default('/patients') }}/{{ duplicate.patient_id }}">View existing registration</a><a class="btn secondary" href="{{ back_url|default('/patients') }}">Cancel</a></div></section>{% endif %}
+<form id="registration-form" class="registration-layout form" method="post" action="{{ form_action|default('/patients/register') }}">
 <input type="hidden" name="_csrf_token" value="{{ csrf_token(request) }}">
+<input type="hidden" name="submission_token" value="{{ submission_token }}">
 <div class="card registration-card"><div class="step-heading"><span>01</span><div><h2>Patient information</h2><p>Required details for this campaign registration.</p></div></div><div class="form-grid">
-<label class="span-2">Campaign *<select name="campaign_id" required><option value="">Select an active campaign</option>{% for c in campaigns %}<option value="{{c.id}}">{{c.name}} · {{c.start_date}} to {{c.end_date}}</option>{% endfor %}</select></label>
-<label class="span-2">Full name *<input name="full_name" placeholder="Patient's full name" required></label>
-<label>Mobile number *<input name="mobile" placeholder="10-digit mobile number" required inputmode="tel"></label>
-<label>Email address <input name="email" type="email" placeholder="patient@example.com"></label>
-<label>Age <input name="age" type="number" min="0" max="130" placeholder="Age"></label>
-<label>Gender <select name="gender"><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></label>
-<label>City <input name="city" placeholder="City"></label>
-<label>Doctor name <input name="doctor_name" placeholder="Referring doctor"></label>
-<label class="span-2">Campaign name <input name="campaign_name" placeholder="Optional campaign reference"></label>
+<label class="span-2">Campaign *<select name="campaign_id" required><option value="">Select an active campaign</option>{% for c in campaigns %}<option value="{{c.id}}" {% if form.campaign_id == c.id %}selected{% endif %}>{{c.name}} · {{c.start_date}} to {{c.end_date}}</option>{% endfor %}</select></label>
+<label class="span-2">Full name *<input name="full_name" value="{{ form.full_name or '' }}" placeholder="Patient's full name" required></label>
+<label>Mobile number *<input name="mobile" value="{{ form.mobile or '' }}" placeholder="10-digit mobile number" required inputmode="tel"></label>
+<label>Email address <input name="email" type="email" value="{{ form.email or '' }}" placeholder="patient@example.com"></label>
+<label>Age <input name="age" type="number" min="0" max="130" value="{{ form.age or '' }}" placeholder="Age"></label>
+<label>Gender <select name="gender"><option value="">Select gender</option>{% for g in ("Male", "Female", "Other") %}<option {% if form.gender == g %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></label>
+<label>City <input name="city" value="{{ form.city or '' }}" placeholder="City"></label>
+<label>Doctor name <input name="doctor_name" value="{{ form.doctor_name or '' }}" placeholder="Referring doctor"></label>
+<label class="span-2">Campaign name <input name="campaign_name" value="{{ form.campaign_name or '' }}" placeholder="Optional campaign reference"></label>
 </div></div>
-<div><section class="card registration-card"><div class="step-heading"><span>02</span><div><h2>Select a service</h2><p>One service offer can be issued per registration.</p></div></div><div class="offer-select">{% for o in offers %}<label class="offer-option" data-campaigns="{% for campaign in o.campaigns %}{{ campaign.id }}{% if not loop.last %},{% endif %}{% endfor %}"><input type="radio" name="offer_id" value="{{ o.id }}" required><span class="offer-check">✓</span><span><b>{{ o.name }}</b><small>{{ o.description }}</small></span></label>{% endfor %}</div>
+<div><section class="card registration-card"><div class="step-heading"><span>02</span><div><h2>Select a service</h2><p>One service offer can be issued per registration.</p></div></div><div class="offer-select">{% for o in offers %}<label class="offer-option" data-campaigns="{% for campaign in o.campaigns %}{{ campaign.id }}{% if not loop.last %},{% endif %}{% endfor %}"><input type="radio" name="offer_id" value="{{ o.id }}" required {% if form.offer_id == o.id %}checked{% endif %}><span class="offer-check">✓</span><span><b>{{ o.name }}</b><small>{{ o.description }}</small></span></label>{% endfor %}</div>
 <div class="form-grid"><label class="span-2">Beneficiary category *<select name="beneficiary_category" required><option value="" disabled {% if not selected_category %}selected{% endif %}>Select a beneficiary category</option>{% for value, label in beneficiary_categories %}<option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label></div>
 </section>
-<section class="card consent-card"><label><input type="checkbox" name="consent_given" value="true" required><span><b>Patient consent recorded *</b><small>The patient agrees to receive this QR offer and related confirmations using the contact details provided.</small></span></label></section>
+<section class="card consent-card"><label><input type="checkbox" name="consent_given" value="true" required {% if form.consent_given %}checked{% endif %}><span><b>Patient consent recorded *</b><small>The patient agrees to receive this QR offer and related confirmations using the contact details provided.</small></span></label></section>
 <div class="form-footer"><a class="btn secondary" href="{{ back_url|default('/patients') }}">Cancel</a><button class="primary btn">Register & generate QR →</button></div></div>
 </form>
 {% endblock %}
@@ -38,6 +40,20 @@
   };
   campaign.addEventListener('change', updateServices);
   updateServices();
+  // One click, one submission. The buttons are disabled a tick later so the clicked
+  // button's own name/value is still sent; the server-side submission token is what
+  // actually guarantees a retry or double-click cannot create a second registration.
+  const form = document.getElementById('registration-form');
+  const buttons = () => document.querySelectorAll('#registration-form button, button[form="registration-form"]');
+  form.addEventListener('submit', (event) => {
+    if (form.dataset.submitting) { event.preventDefault(); return; }
+    form.dataset.submitting = 'true';
+    setTimeout(() => buttons().forEach((button) => { button.disabled = true; }), 0);
+  });
+  window.addEventListener('pageshow', () => {
+    delete form.dataset.submitting;
+    buttons().forEach((button) => { button.disabled = false; });
+  });
 })();
 </script>
 {% endblock %}

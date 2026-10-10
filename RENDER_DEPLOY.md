@@ -100,10 +100,10 @@ Notes on the values above:
   at all in production if `ALLOWED_HOSTS` is empty or `*`.
 - **`QR_SIGNING_KEY`**: must be set as its own value, separately from
   `SESSION_SECRET_KEY` — production startup validation (`app/config.py`) checks this
-  explicitly. Keep it stable across restarts/redeploys: `ensure_qr()`
-  (`app/qr_service.py`) deterministically regenerates a patient's QR PNG from this key if
-  the image file is missing, which self-heals the free tier's ephemeral disk (see the
-  known limitation below) — but only if the key doesn't change.
+  explicitly. Keep it stable across restarts/redeploys and back it up with the
+  database: QR images are not stored. `qr_png_bytes()` (`app/qr/service.py`) derives each
+  QR PNG in memory from the coupon ID and this key whenever it is viewed, downloaded,
+  printed or delivered — so a changed key makes existing QRs unavailable.
 - **`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`** are set low (3/2) because Render's free Postgres
   plan caps total concurrent connections; this is a deliberate, safe choice for a small
   phone test, not a code change.
@@ -114,12 +114,12 @@ Notes on the values above:
 
 ## 4. Known limitation for this free-tier test
 
-Render's **free** web service plan has no persistent disk — `generated_qr/` is wiped on
-every deploy and on any restart. This does not lose data (patient/coupon records live in
-Postgres), and `ensure_qr()` regenerates a missing QR PNG on next view as long as
-`QR_SIGNING_KEY` stays the same — but a QR image download taken right before a restart
-could momentarily 404 until it's viewed again. Acceptable for a short phone test; not
-acceptable to leave running as a real deployment.
+Render's **free** web service plan has no persistent disk. QR images no longer depend on
+it: patient/coupon records live in Postgres and every QR PNG is generated on demand from
+the coupon ID and `QR_SIGNING_KEY`. The one exception is legacy coupons issued before
+hashed tokens (their QR cannot be regenerated): those are served read-only from an
+existing `generated_qr/` file, so on a disk-less plan they show "QR file unavailable"
+and need a replacement coupon.
 
 ## 5. Post-deploy phone test checklist
 

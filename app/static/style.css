@@ -71,6 +71,14 @@
 .filters.patient-filters .filters-actions{margin-left:0}
 .filters.patient-filters .filters-actions .btn{flex:1;text-align:center}
 }
+/* Registration form: recent-duplicate confirmation panel. */
+.duplicate-warning{padding:20px 22px;margin-bottom:22px;border-radius:14px;background:#fff8e6;border:1px solid #ecd28a;color:#5f4708}
+.duplicate-warning h2{margin:0 0 6px;font-size:19px}
+.duplicate-warning p{margin:0 0 14px}
+.duplicate-warning dl{margin-bottom:16px}
+.duplicate-warning dt{color:#7a6320}
+.duplicate-warning button:disabled,.registration-layout button:disabled{opacity:.6;cursor:not-allowed;transform:none}
+
 /* Mobile layout fix (<=800px, covers the 375-767px phone range): the "frontend-main visual
    integration" block above adds an unconditional `.app-main{margin-left:256px}` rule with the
    same specificity as, and positioned after, the original mobile reset inside

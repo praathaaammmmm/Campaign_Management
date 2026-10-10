@@ -10,8 +10,8 @@ from ..query_params import optional_int
 from ..security import require_csrf
 from ..time_utils import utc_now
 from ..registrations.service import (
-    RegistrationError, latest_coupon_for, register_patient_offer,
-    registration_form_options, resend_patient_delivery,
+    RecentDuplicateError, RegistrationError, latest_coupon_for, register_patient_offer,
+    registration_form_options, registration_form_retry, resend_patient_delivery,
 )
 
 router = APIRouter()
@@ -68,33 +68,46 @@ def register_patient(
     offer_id: int = Form(...),
     beneficiary_category: str = Form(""),
     consent_given: bool = Form(False),
+    submission_token: str = Form(""),
+    confirm_repeat: bool = Form(False),
     _csrf: None = Depends(require_csrf),
 ):
     guard = require_admin(request)
     if guard: return guard
     db = request.app.state.db()
     try:
-        coupon = register_patient_offer(
-            db, full_name=full_name, mobile=mobile, email=email, age=age, gender=gender,
-            city=city, doctor_name=doctor_name, campaign_name=campaign_name,
-            campaign_id=campaign_id, offer_id=offer_id, beneficiary_category=beneficiary_category,
-            consent_given=consent_given, actor=request.session.get("user", "admin"),
-        )
-        return RedirectResponse(f"/patients/{coupon.patient_id}", status_code=303)
-    except RegistrationError as exc:
+        duplicate = None
+        try:
+            coupon = register_patient_offer(
+                db, full_name=full_name, mobile=mobile, email=email, age=age, gender=gender,
+                city=city, doctor_name=doctor_name, campaign_name=campaign_name,
+                campaign_id=campaign_id, offer_id=offer_id, beneficiary_category=beneficiary_category,
+                consent_given=consent_given, actor=request.session.get("user", "admin"),
+                submission_key=submission_token, confirm_repeat=confirm_repeat,
+            )
+            return RedirectResponse(f"/patients/{coupon.patient_id}", status_code=303)
+        except RecentDuplicateError as exc:
+            duplicate, error, status_code = exc.recent, None, 409
+        except RegistrationError as exc:
+            error, status_code = str(exc), 422
+        except Exception:
+            logger.exception("Patient registration failed")
+            db.rollback()
+            error, status_code = "Registration could not be completed. Please try again.", 500
+        submitted = {
+            "full_name": full_name, "mobile": mobile, "email": email, "age": age, "gender": gender,
+            "city": city, "doctor_name": doctor_name, "campaign_name": campaign_name,
+            "campaign_id": campaign_id, "offer_id": offer_id, "consent_given": consent_given,
+        }
         return request.app.state.templates.TemplateResponse(request, "register.html", {
-            "request": request, "error": str(exc), **registration_form_options(db),
+            "request": request, "error": error, **registration_form_options(db),
+            **registration_form_retry(submitted, submission_token, duplicate),
             "beneficiary_categories": SELECTABLE_CATEGORIES, "selected_category": beneficiary_category,
-        }, status_code=422)
-    except Exception:
-        logger.exception("Patient registration failed")
-        db.rollback()
-        return request.app.state.templates.TemplateResponse(request, "register.html", {
-            "request": request, "error": "Registration could not be completed. Please try again.", **registration_form_options(db),
-            "beneficiary_categories": SELECTABLE_CATEGORIES, "selected_category": beneficiary_category,
-        }, status_code=500)
+        }, status_code=status_code)
     finally:
         db.close()
+
+
 @router.get("/patients/{patient_id}")
 def patient_detail(request: Request, patient_id: int):
     guard = require_admin(request)
