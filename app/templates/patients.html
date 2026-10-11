@@ -2,6 +2,7 @@
 {% block content %}
 <div class="page-head"><div><span class="eyebrow">{{ 'STAFF WORKSPACE' if workspace == 'staff' else 'PATIENT RELATIONSHIP MANAGEMENT' }}</span><h1>{{ 'Patient registrations' if workspace == 'staff' else 'Patient CRM' }}</h1><p class="muted">Manage patient profiles, services, QR status, redemption and delivery from one workspace.</p></div><a class="primary btn" href="{{ register_url|default('/patients/register') }}">＋ Add patient</a></div>
 {% if workspace != 'staff' %}{% include "includes/crm_tabs.html" %}{% endif %}
+{% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 <form class="filters card patient-filters" method="get" action="{{ list_url|default('/patients') }}">
   <label class="search-field"><span>⌕</span><input name="q" value="{{ q }}" placeholder="Search by name or mobile"></label>

@@ -72,7 +72,8 @@ def _snapshot(connection):
 
 def _check_repeat_registration_migration(database_url):
     """0010 must keep every existing row, allow same-week repeats, and refuse a downgrade
-    that would have to throw repeat registrations away."""
+    that would have to throw repeat registrations away. Pinned to revision 0010 (not
+    "head") so later migrations do not change what this checks."""
     _run_alembic("upgrade", "20260906_0009", database_url=database_url)
     engine = sa.create_engine(database_url)
     try:
@@ -86,7 +87,7 @@ def _check_repeat_registration_migration(database_url):
             with engine.begin() as connection:
                 _insert_registration(connection, "CCCCCCCC", "9000000001")
 
-        _run_alembic("upgrade", "head", database_url=database_url)
+        _run_alembic("upgrade", "20260910_0010", database_url=database_url)
 
         inspector = sa.inspect(engine)
         with engine.begin() as connection:
@@ -102,7 +103,7 @@ def _check_repeat_registration_migration(database_url):
 
         # No repeats yet: the downgrade is clean and the upgrade can be re-applied.
         _run_alembic("downgrade", "20260906_0009", database_url=database_url)
-        _run_alembic("upgrade", "head", database_url=database_url)
+        _run_alembic("upgrade", "20260910_0010", database_url=database_url)
 
         with engine.begin() as connection:
             assert _snapshot(connection) == before
@@ -133,6 +134,93 @@ def test_repeat_registration_migration_preserves_data_on_sqlite(tmp_path):
 )
 def test_repeat_registration_migration_preserves_data_on_postgres():
     _check_repeat_registration_migration(os.environ["TEST_POSTGRES_URL"])
+
+
+def _check_staff_campaign_migration(database_url):
+    """0010 -> 0011 adds the empty staff_campaigns link table and nothing else: existing
+    staff and campaigns survive untouched and start with no assignments; the table
+    enforces its foreign keys and one-row-per-pair rule; the downgrade drops only it.
+    """
+    _run_alembic("upgrade", "20260910_0010", database_url=database_url)
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "INSERT INTO staff_users (username, password_hash, role, active, created_at) "
+                "VALUES ('migration-staff', 'x', 'staff', :active, '2026-09-01 00:00:00')"
+            ), {"active": True})
+            connection.execute(sa.text(
+                "INSERT INTO campaigns (name, start_date, end_date, status, created_by, created_at) "
+                "VALUES ('Migration Campaign', '2026-09-01', '2026-09-30', 'ACTIVE', 'admin', '2026-09-01 00:00:00')"
+            ))
+        def rows():
+            with engine.connect() as connection:
+                return (
+                    [tuple(row) for row in connection.execute(sa.text("SELECT id, username, role, removed_at FROM staff_users ORDER BY id"))],
+                    [tuple(row) for row in connection.execute(sa.text("SELECT id, name, status, created_by FROM campaigns ORDER BY id"))],
+                )
+        before = rows()
+        assert "staff_campaigns" not in sa.inspect(engine).get_table_names()
+
+        _run_alembic("upgrade", "20261011_0011", database_url=database_url)
+
+        assert rows() == before
+        inspector = sa.inspect(engine)
+        assert set(inspector.get_pk_constraint("staff_campaigns")["constrained_columns"]) == {"staff_user_id", "campaign_id"}
+        assert {(fk["referred_table"], tuple(fk["constrained_columns"])) for fk in inspector.get_foreign_keys("staff_campaigns")} == {
+            ("staff_users", ("staff_user_id",)), ("campaigns", ("campaign_id",)),
+        }
+        assert ["campaign_id"] in [index["column_names"] for index in inspector.get_indexes("staff_campaigns")]
+        staff_id, campaign_id = before[0][0][0], before[1][0][0]
+        with engine.begin() as connection:
+            # Existing staff are not granted anything by the migration.
+            assert connection.execute(sa.text("SELECT COUNT(*) FROM staff_campaigns")).scalar() == 0
+            connection.execute(sa.text("INSERT INTO staff_campaigns (staff_user_id, campaign_id) VALUES (:s, :c)"), {"s": staff_id, "c": campaign_id})
+        with pytest.raises(sa.exc.IntegrityError):  # one row per staff/campaign pair
+            with engine.begin() as connection:
+                connection.execute(sa.text("INSERT INTO staff_campaigns (staff_user_id, campaign_id) VALUES (:s, :c)"), {"s": staff_id, "c": campaign_id})
+        if engine.dialect.name == "postgresql":  # SQLite only enforces foreign keys when asked to
+            with pytest.raises(sa.exc.IntegrityError):
+                with engine.begin() as connection:
+                    connection.execute(sa.text("INSERT INTO staff_campaigns (staff_user_id, campaign_id) VALUES (:s, 999999)"), {"s": staff_id})
+
+        _run_alembic("downgrade", "20260910_0010", database_url=database_url)
+        assert "staff_campaigns" not in sa.inspect(engine).get_table_names()
+        assert rows() == before
+        with engine.begin() as connection:
+            connection.execute(sa.text("DELETE FROM staff_users WHERE username = 'migration-staff'"))
+            connection.execute(sa.text("DELETE FROM campaigns WHERE name = 'Migration Campaign'"))
+    finally:
+        engine.dispose()
+    _run_alembic("downgrade", "base", database_url=database_url)
+
+
+def test_staff_campaign_migration_preserves_data_on_sqlite(tmp_path):
+    _check_staff_campaign_migration(f"sqlite:///{tmp_path / 'staff_campaign_migration_test.db'}")
+
+
+@pytest.mark.skipif(
+    not os.getenv("TEST_POSTGRES_URL"),
+    reason="set TEST_POSTGRES_URL to a scratch Postgres database to run this check",
+)
+def test_staff_campaign_migration_preserves_data_on_postgres():
+    _check_staff_campaign_migration(os.environ["TEST_POSTGRES_URL"])
+
+
+def test_models_match_migrated_schema_for_staff_campaigns(tmp_path):
+    """The suite builds its schema from the models, production from the migrations; the
+    new table must come out the same either way."""
+    from app.models import staff_campaigns
+    database_url = f"sqlite:///{tmp_path / 'staff_campaign_parity.db'}"
+    _run_alembic("upgrade", "head", database_url=database_url)
+    engine = sa.create_engine(database_url)
+    try:
+        inspector = sa.inspect(engine)
+        assert {column["name"] for column in inspector.get_columns("staff_campaigns")} == set(staff_campaigns.c.keys())
+        assert set(inspector.get_pk_constraint("staff_campaigns")["constrained_columns"]) == {c.name for c in staff_campaigns.primary_key}
+        assert {index["name"] for index in inspector.get_indexes("staff_campaigns")} == {index.name for index in staff_campaigns.indexes}
+    finally:
+        engine.dispose()
 
 
 def test_full_migration_chain_upgrades_and_downgrades_on_sqlite(tmp_path):

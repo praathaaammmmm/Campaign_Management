@@ -1,6 +1,7 @@
 {% extends "base.html" %}{% block title %}CRM · Add Patient{% endblock %}{% block section_title %}CRM{% endblock %}
 {% block content %}
 <div class="page-head"><div><span class="eyebrow">{{ 'STAFF · NEW REGISTRATION' if workspace == 'staff' else 'CRM · NEW PATIENT' }}</span><h1>Add patient</h1><p class="muted">Capture the patient profile, choose a service, and generate a secure one-time QR offer.</p></div><a class="text-link" href="{{ back_url|default('/patients') }}">← Back</a></div>
+{% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 {% if duplicate %}<section class="duplicate-warning" role="alert"><h2>This QR was issued a few minutes ago</h2><p>A registration for the same mobile number, campaign and service already exists. No new QR has been issued yet.</p><dl><dt>QR ID</dt><dd>{{ duplicate.coupon_uid }}</dd><dt>Issued</dt><dd>{{ duplicate.created_at|clinic_time('%d %b %Y, %I:%M %p') }} IST</dd><dt>Issued by</dt><dd>{{ duplicate.issued_by or '—' }}</dd></dl><div class="actions"><button class="primary btn" type="submit" form="registration-form" name="confirm_repeat" value="true">Issue another QR</button><a class="btn secondary" href="{{ detail_prefix|default('/patients') }}/{{ duplicate.patient_id }}">View existing registration</a><a class="btn secondary" href="{{ back_url|default('/patients') }}">Cancel</a></div></section>{% endif %}
 <form id="registration-form" class="registration-layout form" method="post" action="{{ form_action|default('/patients/register') }}">

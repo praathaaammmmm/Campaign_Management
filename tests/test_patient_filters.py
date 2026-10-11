@@ -70,8 +70,8 @@ def test_staff_status_filter_matches(client):
 
 
 def test_staff_campaign_filter_matches(client):
+    other_campaign_id = _second_campaign()  # before login: staff are assigned the campaigns that exist
     _login_as_staff(client)
-    other_campaign_id = _second_campaign()
     _staff_register(client, "First Campaign Patient", "9100000004", campaign_id="1")
     _staff_register(client, "Second Campaign Patient", "9100000005", campaign_id=str(other_campaign_id))
 
@@ -105,8 +105,8 @@ def test_staff_date_range_is_inclusive_of_end_date(client):
 
 
 def test_staff_combined_filters_apply_together(client):
+    other_campaign_id = _second_campaign()  # before login: staff are assigned the campaigns that exist
     _login_as_staff(client)
-    other_campaign_id = _second_campaign()
     _staff_register(client, "Combo Match Patient", "9100000007", campaign_id="1")
     _staff_register(client, "Combo Wrong Campaign Patient", "9100000008", campaign_id=str(other_campaign_id))
 

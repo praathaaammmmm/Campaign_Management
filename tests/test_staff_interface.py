@@ -1,10 +1,14 @@
 from app.auth import password_hasher
 from app.database import SessionLocal
-from app.models import AuditLog, Patient, StaffUser
+from app.models import AuditLog, Campaign, Patient, StaffUser
 from app.routes.auth import _attempts
 
 
-def _create_staff(username="staff-user", password="staff-password"):
+def _create_staff(username="staff-user", password="staff-password", campaign_ids=None):
+    """Create a staff account. Staff only have access to assigned campaigns, so by default
+    the account is assigned every campaign that exists at this point; pass an explicit
+    ``campaign_ids`` list (possibly empty) to test scoped or unassigned staff.
+    """
     db = SessionLocal()
     try:
         user = StaffUser(
@@ -13,6 +17,10 @@ def _create_staff(username="staff-user", password="staff-password"):
             role="staff",
             active=True,
         )
+        query = db.query(Campaign)
+        if campaign_ids is not None:
+            query = query.filter(Campaign.id.in_(campaign_ids))
+        user.campaigns = query.all()
         db.add(user)
         db.commit()
         return user.id
@@ -20,8 +28,8 @@ def _create_staff(username="staff-user", password="staff-password"):
         db.close()
 
 
-def _login_as_staff(client):
-    _create_staff()
+def _login_as_staff(client, campaign_ids=None):
+    _create_staff(campaign_ids=campaign_ids)
     _attempts.clear()
     client.post("/logout")
     response = client.post(

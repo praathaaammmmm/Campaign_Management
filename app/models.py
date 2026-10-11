@@ -35,6 +35,8 @@ class StaffUser(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    campaigns = relationship("Campaign", secondary="staff_campaigns", order_by="Campaign.name")
+
 class Offer(Base):
     __tablename__ = "offers"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -49,6 +51,15 @@ campaign_offers = Table(
     "campaign_offers", Base.metadata,
     Column("campaign_id", ForeignKey("campaigns.id"), primary_key=True),
     Column("offer_id", ForeignKey("offers.id"), primary_key=True),
+)
+
+# Which campaigns a staff member may work with. No row means no access: a staff account
+# with no assignments can register, see and redeem nothing. Admins are never restricted.
+staff_campaigns = Table(
+    "staff_campaigns", Base.metadata,
+    Column("staff_user_id", ForeignKey("staff_users.id"), primary_key=True),
+    Column("campaign_id", ForeignKey("campaigns.id"), primary_key=True),
+    Index("ix_staff_campaigns_campaign_id", "campaign_id"),
 )
 
 class Campaign(Base):
