@@ -99,11 +99,18 @@ def default_chart_mode(time_series: dict) -> str:
     return "bars" if len(days) <= 7 else "line"
 
 
-def staff_performance(db: Session, start: date | None = None, end: date | None = None) -> list[dict]:
+def staff_performance(db: Session, start: date | None = None, end: date | None = None, campaign_id=None, offer_id=None) -> list[dict]:
+    """Registration and redemption events per staff account. With a campaign and/or
+    service selected, only events on registrations of that campaign/service are counted
+    (every staff account is still listed, with zeros where it has none).
+    """
     join_conditions = [
         AuditLog.user == StaffUser.username,
         AuditLog.action.in_(["PATIENT_REGISTERED", "QR_REDEEMED"]),
     ]
+    scope = _offer_conditions(campaign_id, offer_id, None, None, PatientOffer.created_at)
+    if scope:
+        join_conditions.append(AuditLog.coupon_id.in_(select(PatientOffer.id).where(*scope)))
     start_utc, end_utc = clinic_date_range_to_utc(start, end)
     if start_utc:
         join_conditions.append(AuditLog.timestamp >= start_utc)
@@ -167,8 +174,12 @@ def service_counts(db: Session, campaign_id: int) -> dict[int, tuple[int, int, i
     return {offer_id: (issued, redeemed, expired) for offer_id, issued, redeemed, expired in rows}
 
 
-def patient_export_rows(db: Session, campaign_id=None, offer_id=None, start: date | None = None, end: date | None = None):
-    conditions = _offer_conditions(campaign_id, offer_id, start, end, PatientOffer.created_at)
+def patient_export_rows(db: Session, campaign_id=None, offer_id=None, start: date | None = None, end: date | None = None, conditions=None):
+    """Rows for the patient CSV. ``conditions`` (from ``reporting.filters``) replaces the
+    basic campaign/service/date filter when the caller has a full filter set.
+    """
+    if conditions is None:
+        conditions = _offer_conditions(campaign_id, offer_id, start, end, PatientOffer.created_at)
     return db.execute(select(
         Patient.patient_uid, Patient.full_name, Patient.mobile, Patient.email, Patient.age, Patient.gender,
         Campaign.name.label("campaign"), Offer.name.label("service"), PatientOffer.coupon_uid,

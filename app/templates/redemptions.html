@@ -1,7 +1,8 @@
 {% extends "base.html" %}{% block title %}Redemptions{% endblock %}{% block section_title %}Redemptions{% endblock %}
 {% block content %}
 <div class="page-head"><div><span class="eyebrow">REDEMPTION HISTORY</span><h1>Completed Redemptions</h1><p class="muted">One-time offers already redeemed at the clinic.</p></div><a class="primary btn" href="/validate">⌗ Scan QR</a></div>{% include "includes/crm_tabs.html" %}
-<section class="card table-card"><div class="card-heading"><div><h2>Redemption log</h2><p>{{ rows|length }} completed</p></div></div><div class="table-wrap"><table><thead><tr><th>Patient</th><th>QR ID</th><th>Offer</th><th>Redeemed at</th><th>Operator</th></tr></thead><tbody>
-{% for c in rows %}<tr><td><a href="/patients/{{ c.patient.id }}"><b>{{ c.patient.full_name }}</b><small>{{ c.patient.patient_uid }}</small></a></td><td>{{ c.coupon_uid }}</td><td>{{ c.offer.name }}</td><td>{{ c.redeemed_at|clinic_time }}</td><td>{{ c.redeemed_by or 'Clinic staff' }}</td></tr>{% else %}<tr><td colspan="5"><div class="empty-state">No offers have been redeemed yet.</div></td></tr>{% endfor %}
+{% include "includes/report_filters.html" %}
+<section class="card table-card"><div class="card-heading"><div><h2>Redemption log</h2><p>{{ rows|length }} completed · {{ summary.campaign_label }}</p></div></div><div class="table-wrap"><table><thead><tr><th>Patient</th><th>QR ID</th><th>Campaign</th><th>Offer</th><th>Redeemed at</th><th>Operator</th></tr></thead><tbody>
+{% for c in rows %}<tr><td><a href="/patients/{{ c.patient.id }}"><b>{{ c.patient.full_name }}</b><small>{{ c.patient.patient_uid }}</small></a></td><td>{{ c.coupon_uid }}</td><td>{{ c.campaign.name if c.campaign else "—" }}</td><td>{{ c.offer.name }}</td><td>{{ c.redeemed_at|clinic_time }}</td><td>{{ c.redeemed_by or 'Clinic staff' }}</td></tr>{% else %}<tr><td colspan="6"><div class="empty-state">{{ "No redemptions match these filters." if summary.parts else "No offers have been redeemed yet." }}</div></td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endblock %}

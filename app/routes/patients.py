@@ -1,12 +1,12 @@
 import logging
-from fastapi import APIRouter, Depends, Request, Form, Query
+from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import RedirectResponse
-from sqlalchemy import or_
+from sqlalchemy.orm import contains_eager, joinedload
 from ..auth import require_admin
 from ..audit_service import audit
 from ..beneficiary_categories import SELECTABLE_CATEGORIES
 from ..models import Patient, PatientOffer, Offer, AuditLog
-from ..query_params import optional_int
+from ..reporting.filters import ReportFilters, coupon_conditions, filter_choices, filter_summary
 from ..security import require_csrf
 from ..time_utils import utc_now
 from ..registrations.service import (
@@ -18,24 +18,28 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+PATIENT_FILTERS = ("campaign_id", "offer_id", "status", "q", "dates")
+
+
 @router.get("/patients")
-def patients(request: Request, q: str = Query("", max_length=100), status: str = "", offer_id: str = Query("")):
+def patients(request: Request):
     guard = require_admin(request)
     if guard: return guard
-    offer_id = optional_int(offer_id)
+    filters = ReportFilters.from_request(request)
     db = request.app.state.db()
     try:
-        query = db.query(PatientOffer).join(Patient).join(Offer)
-        if q:
-            query = query.filter(or_(Patient.full_name.ilike(f"%{q}%"), Patient.mobile.ilike(f"%{q}%")))
-        if status:
-            query = query.filter(PatientOffer.status == status)
-        if offer_id:
-            query = query.filter(PatientOffer.offer_id == offer_id)
-        rows = query.order_by(Patient.created_at.desc()).all()
-        offers = db.query(Offer).all()
+        rows = (
+            db.query(PatientOffer).join(PatientOffer.patient).join(PatientOffer.offer)
+            .options(contains_eager(PatientOffer.patient), contains_eager(PatientOffer.offer), joinedload(PatientOffer.campaign))
+            .filter(*coupon_conditions(filters, *PATIENT_FILTERS))
+            .order_by(PatientOffer.created_at.desc(), PatientOffer.id.desc()).all()
+        )
+        export_query = filters.query("campaign_id", "offer_id", "status", "q", "start", "end")
         return request.app.state.templates.TemplateResponse(request, "patients.html", {
-            "request": request, "rows": rows, "offers": offers, "q": q, "status": status, "offer_id": offer_id
+            "request": request, "rows": rows, **filter_choices(db), "q": filters.q, "status": filters.status,
+            "offer_id": filters.offer_id, "campaign_id": filters.campaign_id, "start": filters.start, "end": filters.end,
+            "filters": filters, "summary": filter_summary(db, filters, *PATIENT_FILTERS),
+            "exports": [{"label": "Download CSV", "url": f"/admin/reports/patients.csv{'?' + export_query if export_query else ''}"}],
         })
     finally:
         db.close()

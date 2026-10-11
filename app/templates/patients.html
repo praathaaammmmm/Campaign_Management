@@ -4,7 +4,7 @@
 {% if workspace != 'staff' %}{% include "includes/crm_tabs.html" %}{% endif %}
 {% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
-<form class="filters card patient-filters" method="get" action="{{ list_url|default('/patients') }}">
+{% if workspace == 'staff' %}<form class="filters card patient-filters" method="get" action="{{ list_url|default('/patients') }}">
   <label class="search-field"><span>⌕</span><input name="q" value="{{ q }}" placeholder="Search by name or mobile"></label>
   <select name="status"><option value="">All statuses</option>{% for x in ['ACTIVE','REDEEMED','EXPIRED','CANCELLED'] %}<option value="{{x}}" {% if status==x %}selected{% endif %}>{{x.title()}}</option>{% endfor %}</select>
   {% if workspace == 'staff' %}
@@ -14,8 +14,8 @@
   <select name="offer_id"><option value="">All offers</option>{% for o in offers %}<option value="{{o.id}}" {% if offer_id==o.id %}selected{% endif %}>{{o.name}}</option>{% endfor %}</select>
   {% endif %}
   <div class="filters-actions"><button class="btn primary" type="submit">Search &amp; apply filters</button><a class="btn secondary" href="{{ list_url|default('/patients') }}">Reset</a></div>
-</form>
-<section class="card table-card"><div class="card-heading"><div><h2>Patient list</h2><p>{{ rows|length }} matching record{% if rows|length != 1 %}s{% endif %}</p></div></div><div class="table-wrap"><table><thead><tr><th>Patient</th><th>Contact</th><th>Age / Gender</th><th>Service</th><th>Category</th><th>Registered</th><th>Status</th><th></th></tr></thead><tbody>
-{% for c in rows %}<tr><td><a href="{{ detail_prefix|default('/patients') }}/{{c.patient.id}}"><b>{{ c.patient.full_name }}</b><small>{{ c.patient.patient_uid }}</small></a></td><td>{{ c.patient.mobile }}<small>{{ c.patient.email or 'No email' }}</small></td><td>{{ c.patient.age or '—' }} / {{ c.patient.gender or '—' }}</td><td>{{ c.offer.name }}</td><td>{{ c.beneficiary_category|category_label }}</td><td>{{ c.created_at|clinic_time('%d %b %Y') }}</td><td><span class="badge {{c.status|lower}}">{{c.status}}</span></td><td><a class="row-action" href="{{ detail_prefix|default('/patients') }}/{{c.patient.id}}" aria-label="View {{ c.patient.full_name }}">→</a></td></tr>{% else %}<tr><td colspan="8"><div class="empty-state">No patients match these filters.</div></td></tr>{% endfor %}
+</form>{% else %}{% set filter_fields = ("campaign_id", "offer_id", "status", "q", "dates") %}{% set reset_url = "/patients" %}{% include "includes/report_filters.html" %}{% endif %}
+<section class="card table-card"><div class="card-heading"><div><h2>Patient list</h2><p>{{ rows|length }} matching record{% if rows|length != 1 %}s{% endif %}{% if workspace != 'staff' %} · {{ summary.campaign_label }}{% endif %}</p></div></div><div class="table-wrap"><table><thead><tr><th>Patient</th><th>Contact</th><th>Age / Gender</th>{% if workspace != 'staff' %}<th>Campaign</th>{% endif %}<th>Service</th><th>Category</th><th>Registered</th><th>Status</th><th></th></tr></thead><tbody>
+{% for c in rows %}<tr><td><a href="{{ detail_prefix|default('/patients') }}/{{c.patient.id}}"><b>{{ c.patient.full_name }}</b><small>{{ c.patient.patient_uid }}</small></a></td><td>{{ c.patient.mobile }}<small>{{ c.patient.email or 'No email' }}</small></td><td>{{ c.patient.age or '—' }} / {{ c.patient.gender or '—' }}</td>{% if workspace != 'staff' %}<td>{{ c.campaign.name if c.campaign else "—" }}</td>{% endif %}<td>{{ c.offer.name }}</td><td>{{ c.beneficiary_category|category_label }}</td><td>{{ c.created_at|clinic_time('%d %b %Y') }}</td><td><span class="badge {{c.status|lower}}">{{c.status}}</span></td><td><a class="row-action" href="{{ detail_prefix|default('/patients') }}/{{c.patient.id}}" aria-label="View {{ c.patient.full_name }}">→</a></td></tr>{% else %}<tr><td colspan="9"><div class="empty-state">No patients match these filters.</div></td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endblock %}

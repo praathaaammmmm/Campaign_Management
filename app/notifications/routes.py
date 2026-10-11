@@ -2,13 +2,18 @@ import secrets
 
 from fastapi import APIRouter, Request, Header, HTTPException
 
+from sqlalchemy.orm import contains_eager, joinedload
+
 from ..audit_service import audit
 from ..auth import require_admin
 from ..models import DeliveryLog, PatientOffer
 from ..config import N8N_WEBHOOK_LEGACY_CALLBACK_COMPAT, N8N_WEBHOOK_SECRET
+from ..reporting.filters import ReportFilters, coupon_conditions, filter_choices, filter_summary
 from ..time_utils import utc_now
 
 router = APIRouter()
+
+DELIVERY_FILTERS = ("campaign_id", "offer_id", "channel", "delivery_status", "q", "dates")
 
 SYSTEM_ACTOR = "system:n8n-callback"
 CALLBACK_STATUSES = {"SENT", "DELIVERED", "FAILED"}
@@ -28,10 +33,25 @@ def delivery(request: Request):
     guard = require_admin(request)
     if guard:
         return guard
+    filters = ReportFilters.from_request(request)
     db = request.app.state.db()
     try:
-        rows = db.query(DeliveryLog, PatientOffer).join(PatientOffer, DeliveryLog.coupon_id == PatientOffer.id).order_by(DeliveryLog.sent_at.desc()).all()
-        return request.app.state.templates.TemplateResponse(request, "delivery.html", {"request": request, "rows": rows})
+        # A delivery attempt has no campaign of its own: it is filtered through its coupon.
+        conditions = coupon_conditions(filters, "campaign_id", "offer_id", "q", "dates", date_column=DeliveryLog.sent_at)
+        if filters.channel:
+            conditions.append(DeliveryLog.channel == filters.channel)
+        if filters.delivery_status:
+            conditions.append(DeliveryLog.status == filters.delivery_status)
+        rows = (
+            db.query(DeliveryLog, PatientOffer).join(PatientOffer, DeliveryLog.coupon_id == PatientOffer.id).join(PatientOffer.patient)
+            .options(contains_eager(PatientOffer.patient), joinedload(PatientOffer.campaign))
+            .filter(*conditions).order_by(DeliveryLog.sent_at.desc(), DeliveryLog.id.desc()).all()
+        )
+        return request.app.state.templates.TemplateResponse(request, "delivery.html", {
+            "request": request, "rows": rows, **filter_choices(db), "filters": filters,
+            "filter_fields": DELIVERY_FILTERS, "reset_url": "/delivery", "date_label": "Sent",
+            "summary": filter_summary(db, filters, *DELIVERY_FILTERS, date_label="Sent"),
+        })
     finally:
         db.close()
 
