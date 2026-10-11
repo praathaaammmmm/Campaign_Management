@@ -79,6 +79,10 @@
 .duplicate-warning dt{color:#7a6320}
 .duplicate-warning button:disabled,.registration-layout button:disabled{opacity:.6;cursor:not-allowed;transform:none}
 
+/* Long service lists: the registration picker and the campaign service table scroll
+   inside their card instead of stretching the page. */
+.offer-select{max-height:460px;overflow-y:auto;padding:2px}.offer-search{width:100%;margin-bottom:12px}.offer-search[hidden],.offer-empty[hidden]{display:none}.offer-empty{margin:0}.service-table-wrap{max-height:560px;overflow-y:auto}.card>.form-grid+.form-grid{border-top:1px solid #e8efed}
+
 /* Mobile layout fix (<=800px, covers the 375-767px phone range): the "frontend-main visual
    integration" block above adds an unconditional `.app-main{margin-left:256px}` rule with the
    same specificity as, and positioned after, the original mobile reset inside

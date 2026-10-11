@@ -8,10 +8,10 @@ from datetime import datetime, timedelta
 from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..audit_service import audit
-from ..models import AuditLog, Campaign, Offer, Patient, PatientOffer
+from ..models import AuditLog, Campaign, Offer, Patient, PatientOffer, campaign_offers
 from ..qr.service import expiry_for, new_uid, token_for, token_hash
 from ..notifications.service import queue_registration_deliveries, send_qr_delivery
 from ..schemas import PatientCreate
@@ -97,6 +97,21 @@ def _lock_registration_slot(db: Session, mobile: str, campaign_id: int, offer_id
         text("SELECT pg_advisory_xact_lock(hashtextextended(:slot, 0))"),
         {"slot": f"registration:{mobile}:{campaign_id}:{offer_id}"},
     )
+
+
+def _offer_assigned(db: Session, campaign_id: int, offer_id: int) -> bool:
+    """Whether the service is assigned to the campaign right now, read from the link row
+    itself rather than a cached relationship. On PostgreSQL the row is share-locked until
+    this transaction ends: an admin removing the service at the same moment either commits
+    first (this read then waits and sees no row, so the registration is rejected) or waits
+    for this registration to commit. Concurrent registrations share the lock and never
+    block each other. SQLite (development/tests) ignores the lock clause.
+    """
+    return db.execute(
+        select(campaign_offers.c.offer_id)
+        .where(campaign_offers.c.campaign_id == campaign_id, campaign_offers.c.offer_id == offer_id)
+        .with_for_update(read=True)
+    ).first() is not None
 
 
 def _recent_registration(db: Session, mobile: str, campaign_id: int, offer_id: int, now: datetime) -> RecentRegistration | None:
@@ -217,8 +232,13 @@ def _create_registration(
         raise CampaignUnavailableError("Please select an active campaign.")
     if not (campaign.start_date <= now.date() <= campaign.end_date):
         raise CampaignUnavailableError("The selected campaign is not active for today's date.")
-    if offer.id not in {item.id for item in campaign.offers}:
+    if not _offer_assigned(db, campaign.id, offer.id):
         raise OfferUnavailableError("The selected service is not part of this campaign.")
+    # Re-read the catalog row under a share lock (PostgreSQL), so a service being
+    # deactivated at this moment is either seen as inactive or waits for this registration.
+    db.refresh(offer, with_for_update={"read": True})
+    if not offer.active:
+        raise OfferUnavailableError("The selected service is no longer available.")
 
     _lock_registration_slot(db, form.mobile, campaign.id, offer.id)
     # Re-check under the lock: a same-key request may have committed while this one waited.
@@ -296,7 +316,7 @@ def registration_form_options(db: Session, campaigns: list[Campaign] | None = No
     """
     return {
         "form": {}, "duplicate": None, "submission_token": new_submission_token(),
-        "offers": db.query(Offer).filter(Offer.active == True).order_by(Offer.id).all(),
+        "offers": db.query(Offer).options(selectinload(Offer.campaigns)).filter(Offer.active == True).order_by(Offer.id).all(),
         "campaigns": campaigns if campaigns is not None else (
             db.query(Campaign).filter(Campaign.status == "ACTIVE").order_by(Campaign.start_date.desc()).all()
         ),

@@ -17,7 +17,7 @@
 <label>Doctor name <input name="doctor_name" value="{{ form.doctor_name or '' }}" placeholder="Referring doctor"></label>
 <label class="span-2">Campaign name <input name="campaign_name" value="{{ form.campaign_name or '' }}" placeholder="Optional campaign reference"></label>
 </div></div>
-<div><section class="card registration-card"><div class="step-heading"><span>02</span><div><h2>Select a service</h2><p>One service offer can be issued per registration.</p></div></div><div class="offer-select">{% for o in offers %}<label class="offer-option" data-campaigns="{% for campaign in o.campaigns %}{{ campaign.id }}{% if not loop.last %},{% endif %}{% endfor %}"><input type="radio" name="offer_id" value="{{ o.id }}" required {% if form.offer_id == o.id %}checked{% endif %}><span class="offer-check">✓</span><span><b>{{ o.name }}</b><small>{{ o.description }}</small></span></label>{% endfor %}</div>
+<div><section class="card registration-card"><div class="step-heading"><span>02</span><div><h2>Select a service</h2><p>One service offer can be issued per registration.</p></div></div><input type="search" class="offer-search" placeholder="Search services" aria-label="Search services" autocomplete="off" hidden><div class="offer-select">{% for o in offers %}<label class="offer-option" data-campaigns="{% for campaign in o.campaigns %}{{ campaign.id }}{% if not loop.last %},{% endif %}{% endfor %}"><input type="radio" name="offer_id" value="{{ o.id }}" required {% if form.offer_id == o.id %}checked{% endif %}><span class="offer-check">✓</span><span><b>{{ o.name }}</b><small>{{ o.description }}</small></span></label>{% endfor %}<p class="muted offer-empty" hidden>No services match your search.</p></div>
 <div class="form-grid"><label class="span-2">Beneficiary category *<select name="beneficiary_category" required><option value="" disabled {% if not selected_category %}selected{% endif %}>Select a beneficiary category</option>{% for value, label in beneficiary_categories %}<option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label></div>
 </section>
 <section class="card consent-card"><label><input type="checkbox" name="consent_given" value="true" required {% if form.consent_given %}checked{% endif %}><span><b>Patient consent recorded *</b><small>The patient agrees to receive this QR offer and related confirmations using the contact details provided.</small></span></label></section>
@@ -29,16 +29,37 @@
 (() => {
   const campaign = document.querySelector('select[name="campaign_id"]');
   const options = document.querySelectorAll('.offer-option[data-campaigns]');
+  const search = document.querySelector('.offer-search');
+  const empty = document.querySelector('.offer-empty');
+  // A campaign can carry any number of services; past this many the list gets a search box.
+  const SEARCH_THRESHOLD = 8;
   const updateServices = () => {
     const selected = campaign.value;
+    const allowed = [...options].filter((option) => selected && option.dataset.campaigns.split(',').includes(selected));
+    search.hidden = allowed.length <= SEARCH_THRESHOLD;
+    if (search.hidden) search.value = '';
+    const term = search.value.trim().toLowerCase();
+    let shown = 0;
     options.forEach((option) => {
-      const allowed = selected && option.dataset.campaigns.split(',').includes(selected);
-      option.hidden = !allowed;
-      option.querySelector('input').disabled = !allowed;
-      if (!allowed) option.querySelector('input').checked = false;
+      const input = option.querySelector('input');
+      const isAllowed = allowed.includes(option);
+      input.disabled = !isAllowed;
+      if (!isAllowed) input.checked = false;
+      // The chosen service always stays visible, whatever the search says.
+      const visible = isAllowed && (input.checked || !term || option.textContent.toLowerCase().includes(term));
+      option.hidden = !visible;
+      if (visible) shown += 1;
     });
+    empty.hidden = !(allowed.length && !shown);
   };
   campaign.addEventListener('change', updateServices);
+  search.addEventListener('input', updateServices);
+  // Enter in the search box must not submit the registration.
+  search.addEventListener('keydown', (event) => { if (event.key === 'Enter') event.preventDefault(); });
+  // "Choose a service" validation can only be shown on a visible option.
+  document.getElementById('registration-form').addEventListener('invalid', (event) => {
+    if (event.target.name === 'offer_id' && search.value) { search.value = ''; updateServices(); }
+  }, true);
   updateServices();
   // One click, one submission. The buttons are disabled a tick later so the clicked
   // button's own name/value is still sent; the server-side submission token is what

@@ -17,9 +17,11 @@
   <hr class="sidebar-divider">
   <nav class="side-nav" aria-label="Main navigation">
     {% if request.session.get('role', 'admin') == 'admin' %}
-      {% set admin_crm_active = path.startswith('/admin/dashboard') or path.startswith('/admin/campaigns') %}
+      {% set admin_crm_active = path.startswith('/admin/dashboard') %}
+      {% set campaigns_active = path.startswith('/admin/campaigns') %}
       {% set crm_active = path.startswith('/patients') or path == '/offers' or path.startswith('/admin/services') or path.startswith('/redemptions') or path.startswith('/delivery') %}
       <a class="{% if admin_crm_active %}active{% endif %}" href="/admin/dashboard"{% if admin_crm_active %} aria-current="page"{% endif %}><span>◈</span>Admin CRM</a>
+      <a class="{% if campaigns_active %}active{% endif %}" href="/admin/campaigns"{% if campaigns_active %} aria-current="page"{% endif %}><span>⚑</span>Campaigns</a>
       <a class="{% if path.startswith('/admin/staff') %}active{% endif %}" href="/admin/staff"{% if path.startswith('/admin/staff') %} aria-current="page"{% endif %}><span>♟</span>Staff</a>
       <a class="{% if path.startswith('/admin/audit') %}active{% endif %}" href="/admin/audit"{% if path.startswith('/admin/audit') %} aria-current="page"{% endif %}><span>◷</span>Audit log</a>
       <details class="nav-dropdown{% if crm_active %} active{% endif %}"{% if crm_active %} open{% endif %}>

@@ -153,6 +153,20 @@ def counts(db: Session, campaign_id=None, offer_id=None, start: date | None = No
     return summary["issued"], summary["redeemed"], summary["expired"]
 
 
+def service_counts(db: Session, campaign_id: int) -> dict[int, tuple[int, int, int]]:
+    """(issued, redeemed, expired) per service for one campaign, keyed by offer id, in a
+    single query. Built from the registrations themselves rather than the campaign's
+    current service list, so a service removed from the campaign still reports its history.
+    """
+    rows = db.execute(select(
+        PatientOffer.offer_id,
+        func.count(PatientOffer.id),
+        func.coalesce(func.sum(case((PatientOffer.status == "REDEEMED", 1), else_=0)), 0),
+        func.coalesce(func.sum(case((PatientOffer.status == "EXPIRED", 1), else_=0)), 0),
+    ).where(PatientOffer.campaign_id == campaign_id).group_by(PatientOffer.offer_id)).all()
+    return {offer_id: (issued, redeemed, expired) for offer_id, issued, redeemed, expired in rows}
+
+
 def patient_export_rows(db: Session, campaign_id=None, offer_id=None, start: date | None = None, end: date | None = None):
     conditions = _offer_conditions(campaign_id, offer_id, start, end, PatientOffer.created_at)
     return db.execute(select(
