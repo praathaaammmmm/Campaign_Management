@@ -3,7 +3,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from ..auth import require_admin
 from ..models import PatientOffer
-from ..qr.service import find_coupon, refresh_expiry, redeem_atomic, result_for
+from ..qr.service import find_coupon, record_detail_view, refresh_expiry, redeem_atomic, result_for
 from ..audit_service import audit
 from ..security import require_csrf
 from ..time_utils import utc_now
@@ -35,6 +35,7 @@ def validate_submit(request: Request, token: str = Form(...), _csrf: None = Depe
                 audit(db, request.session.get("user", "admin"), "QR_EXPIRED", coupon.id, coupon.patient_id)
             result = result_for(coupon)
             audit(db, request.session.get("user", "admin"), "QR_VALIDATED", coupon.id, coupon.patient_id, {"result": result["kind"]})
+            record_detail_view(db, request, result)
             db.commit()
         return request.app.state.templates.TemplateResponse(request, "validate.html", {"request": request, "result": result, "token": ""})
     finally:
@@ -50,11 +51,12 @@ def validation_result(request: Request, coupon_uid: str):
         if not coupon:
             return RedirectResponse("/validate", status_code=303)
         refresh_expiry(coupon, utc_now())
-        db.commit()
         result = result_for(coupon)
         if result["kind"] == "REDEEMED" and request.session.get("just_redeemed") == coupon.coupon_uid:
             request.session.pop("just_redeemed", None)
             result = {"kind": "JUST_REDEEMED", "coupon": coupon}
+        record_detail_view(db, request, result)
+        db.commit()
         return request.app.state.templates.TemplateResponse(request, "validate.html", {"request": request, "result": result, "token": ""})
     finally:
         db.close()

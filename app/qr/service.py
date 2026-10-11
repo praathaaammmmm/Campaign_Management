@@ -17,8 +17,13 @@ import qrcode
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from ..audit_service import audit
 from ..config import QR_DIR, QR_SIGNING_KEY
 from ..models import PatientOffer
+
+# Result kinds whose screen shows the patient's details. An expired or cancelled QR shows
+# its status and the offer it was for, but no patient details; an invalid one shows nothing.
+PATIENT_DETAIL_KINDS = frozenset({"VALID", "JUST_REDEEMED", "REDEEMED"})
 
 
 def token_for(coupon_uid: str) -> str:
@@ -88,6 +93,24 @@ def result_for(coupon: PatientOffer) -> dict:
     if coupon.status == "CANCELLED": return {"kind": "CANCELLED", "coupon": coupon}
     if coupon.status == "EXPIRED": return {"kind": "EXPIRED", "coupon": coupon}
     return {"kind": "VALID", "coupon": coupon}
+
+
+def record_detail_view(db: Session, request, result: dict) -> bool:
+    """Audit that an authenticated user was shown a patient's details through a QR.
+
+    Written once per rendered result that actually displays patient details (a valid or
+    already-redeemed QR) — never for an unknown/malformed entry, and never for an expired
+    or cancelled QR, whose screen shows no patient details. The caller commits. The viewer
+    is the logged-in session, never anything the browser submitted.
+    """
+    coupon = result.get("coupon")
+    if coupon is None or result["kind"] not in PATIENT_DETAIL_KINDS:
+        return False
+    audit(db, request.session.get("user", "admin"), "QR_DETAILS_VIEWED", coupon.id, coupon.patient_id, {
+        "role": request.session.get("role", "admin"), "coupon_uid": coupon.coupon_uid,
+        "campaign_id": coupon.campaign_id, "status": result["kind"],
+    })
+    return True
 
 
 def refresh_expiry(coupon: PatientOffer, now: datetime) -> bool:

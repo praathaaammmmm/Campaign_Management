@@ -421,7 +421,8 @@ def test_unassigned_staff_get_the_same_valid_qr_result_as_assigned_staff(client)
         assert f'action="/staff/patients/{patient_id}/redeem"' in body and "Redeem offer" in body
     assert unassigned_views["image"][0] == 200 and unassigned_views["image"][1]["content-type"] == "image/png"
     assert "attachment" in unassigned_views["download"][1]["content-disposition"]
-    assert unassigned_views["print"][0] == 200 and "Other Campaign Patient" in unassigned_views["print"][2]
+    assert unassigned_views["print"][0] == 200 and coupon_uid in unassigned_views["print"][2]
+    assert "Other Campaign Patient" not in unassigned_views["print"][2]  # the printable coupon carries no patient details
     assert _coupon(coupon_id)[0] == "ACTIVE"  # looking is not redeeming
     assert {details["result"] for _, details, _ in _audits("QR_VALIDATED")} == {"VALID"}
 
@@ -525,7 +526,8 @@ def test_admin_qr_access_is_unchanged(client):
 
     assert client.get(f"/qr/{coupon_uid}.png").headers["content-type"] == "image/png"
     assert "attachment" in client.get(f"/qr/{coupon_uid}/download").headers["content-disposition"]
-    assert "Other Campaign Patient" in client.get(f"/qr/{coupon_uid}/print").text
+    printed = client.get(f"/qr/{coupon_uid}/print").text
+    assert coupon_uid in printed and "Other Campaign Patient" not in printed
     for suffix in (".png", "/download", "/print"):  # a missing QR still sends an admin to the coupon ledger
         response = client.get(f"/qr/SRD-0000ABCD{suffix}", follow_redirects=False)
         assert (response.status_code, response.headers["location"]) == (303, "/offers")

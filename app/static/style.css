@@ -89,6 +89,10 @@
 /* Admin report filter bar: active-filter summary and export actions under the form. */
 .filter-summary{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 18px;margin:-6px 0 18px;color:#44554f;font-size:13.5px}.filter-summary p{margin:0}.filter-summary .btn{padding:8px 14px;font-size:13px}.filter-context{color:#087c6b}
 
+/* QR validation result: grouped patient / offer / validity details. */
+.result-copy{min-width:0}.qr-detail-group{margin-top:18px}.qr-detail-group h3{margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#718094}.qr-detail-group .result-details{margin:0}.qr-detail-group .result-details b{overflow-wrap:anywhere}.qr-detail-group .result-details b.badge{display:inline-block}.qr-redeem{margin-top:22px}
+@media(max-width:520px){.result-panel{flex-direction:column;gap:12px}.qr-redeem .btn{width:100%}}
+
 /* Mobile layout fix (<=800px, covers the 375-767px phone range): the "frontend-main visual
    integration" block above adds an unconditional `.app-main{margin-left:256px}` rule with the
    same specificity as, and positioned after, the original mobile reset inside

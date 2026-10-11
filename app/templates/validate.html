@@ -6,6 +6,42 @@
   <div><span class="eyebrow">SECURE VALIDATION</span><h1>Scan and validate QR</h1><p class="muted">Use the camera or enter the printed QR ID to verify an offer.</p></div>
   {% if workspace != 'staff' %}<a class="text-link" href="/redemptions">View redemptions →</a>{% else %}<a class="text-link" href="{{ back_url|default('/staff/home') }}">← Back to workspace</a>{% endif %}
 </div>
+{% if result %}
+{# Shown above the scanner so the outcome is the first thing on screen (on a phone the
+   scanner and manual form would otherwise push it far down). Reception-desk order: status first, then who the patient is, then what the offer is,
+   then the redeem control. Patient details appear only for a valid or already-redeemed
+   QR; an expired or cancelled QR shows the offer but no patient details; an invalid one
+   shows nothing. #}
+<section class="card result-panel {{ result.kind|lower }}" id="qr-result">
+  <div class="result-symbol">{% if result.kind in ('VALID', 'JUST_REDEEMED') %}✓{% else %}×{% endif %}</div>
+  <div class="result-copy">
+  {% set c = result.coupon if result.coupon is defined else none %}
+  {% if result.kind == 'VALID' %}
+    <span class="eyebrow">VALIDATION SUCCESSFUL</span><h2>OFFER VALID</h2><p>This QR is active and may be redeemed once.</p>
+  {% elif result.kind == 'JUST_REDEEMED' %}
+    <span class="eyebrow">REDEMPTION SUCCESSFUL</span><h2>Offer redeemed successfully</h2><p>This offer has been marked as used and cannot be redeemed again.</p>
+  {% elif result.kind == 'REDEEMED' %}
+    <span class="eyebrow">REDEMPTION BLOCKED</span><h2>OFFER ALREADY USED</h2><p><b>{{ c.patient.full_name }}</b> used this offer on {{ c.redeemed_at|clinic_time('%d %b %Y, %I:%M %p') }} IST. This QR cannot be used again.</p>
+  {% elif result.kind == 'EXPIRED' %}
+    <span class="eyebrow">OFFER EXPIRED</span><h2>OFFER EXPIRED</h2><p>The offer expired on {{ c.expires_at|clinic_time('%d %b %Y') }} and can no longer be redeemed.</p>
+  {% elif result.kind == 'CANCELLED' %}
+    <span class="eyebrow">OFFER CANCELLED</span><h2>OFFER CANCELLED</h2><p>This offer is no longer valid and cannot be redeemed.</p>
+  {% else %}
+    <span class="eyebrow">VALIDATION FAILED</span><h2>INVALID QR</h2><p>{{ result.message }}</p>
+  {% endif %}
+  {% if c and result.kind in ('VALID', 'JUST_REDEEMED', 'REDEEMED') %}
+    <div class="qr-detail-group" data-group="patient"><h3>Patient</h3><div class="result-details"><span><small>Patient</small><b>{{ c.patient.full_name }}</b></span><span><small>Mobile</small><b>{{ c.patient.mobile }}</b></span>{% if c.patient.email %}<span><small>Email</small><b>{{ c.patient.email }}</b></span>{% endif %}<span><small>Age</small><b>{{ c.patient.age if c.patient.age is not none else '—' }}</b></span><span><small>Gender</small><b>{{ c.patient.gender or '—' }}</b></span><span><small>City</small><b>{{ c.patient.city or '—' }}</b></span><span><small>Doctor</small><b>{{ c.patient.doctor_name or '—' }}</b></span><span><small>Beneficiary category</small><b>{{ c.beneficiary_category|category_label }}</b></span></div></div>
+  {% endif %}
+  {% if c %}
+    <div class="qr-detail-group" data-group="offer"><h3>Campaign &amp; service</h3><div class="result-details"><span><small>Campaign</small><b>{{ c.campaign.name if c.campaign else '—' }}</b></span><span><small>Service</small><b>{{ c.offer.name }}</b></span><span><small>QR ID</small><b>{{ c.coupon_uid }}</b></span></div></div>
+    <div class="qr-detail-group" data-group="validity"><h3>Validity</h3><div class="result-details"><span><small>Issued</small><b>{{ c.created_at|clinic_time('%d %b %Y') }}</b></span><span><small>Expires</small><b>{{ c.expires_at|clinic_time('%d %b %Y') }}</b></span><span><small>Status</small><b class="badge {{ c.status|lower }}">{{ c.status }}</b></span>{% if c.status == 'REDEEMED' %}<span><small>Redeemed</small><b>{{ c.redeemed_at|clinic_time('%d %b %Y, %I:%M %p') }} IST</b></span><span><small>Redeemed by</small><b>{{ c.redeemed_by or 'Clinic staff' }}</b></span>{% endif %}</div></div>
+  {% endif %}
+  {% if result.kind == 'VALID' %}
+    <form class="qr-redeem" method="post" action="{{ redeem_url|default('/redeem/' ~ c.id) }}" onsubmit="return confirm('Redeem this offer? This cannot be undone.')"><input type="hidden" name="_csrf_token" value="{{ csrf_token(request) }}"><button class="danger btn">Redeem offer</button></form>
+  {% endif %}
+  </div>
+</section>
+{% endif %}
 <div class="scanner-layout">
   {% if error %}<div class="error">{{ error }}</div>{% endif %}
   <section class="card scanner-card">
@@ -24,29 +60,6 @@
     <div class="security-note">🔒 Validation is checked against the clinic's signed QR records.</div>
   </section>
 </div>
-{% if result %}
-<section class="card result-panel {{ result.kind|lower }}">
-  <div class="result-symbol">{% if result.kind in ('VALID', 'JUST_REDEEMED') %}✓{% else %}×{% endif %}</div>
-  <div class="result-copy">
-  {% if result.kind == 'VALID' %}
-    <span class="eyebrow">VALIDATION SUCCESSFUL</span><h2>OFFER VALID</h2><p>This QR is active and may be redeemed once.</p>
-    <div class="result-details"><span><small>Patient</small><b>{{ result.coupon.patient.full_name }}</b></span><span><small>Offer</small><b>{{ result.coupon.offer.name }}</b></span><span><small>Expires</small><b>{{ result.coupon.expires_at|clinic_time('%d %b %Y') }}</b></span><span><small>Status</small><b class="badge active">ACTIVE</b></span></div>
-    <form method="post" action="{{ redeem_url|default('/redeem/' ~ result.coupon.id) }}" onsubmit="return confirm('Redeem this offer? This cannot be undone.')"><input type="hidden" name="_csrf_token" value="{{ csrf_token(request) }}"><button class="danger btn">Redeem offer</button></form>
-  {% elif result.kind == 'JUST_REDEEMED' %}
-    <span class="eyebrow">REDEMPTION SUCCESSFUL</span><h2>Offer redeemed successfully</h2><p>This offer has been marked as used and cannot be redeemed again.</p>
-    <div class="result-details"><span><small>Patient</small><b>{{ result.coupon.patient.full_name }}</b></span><span><small>Service</small><b>{{ result.coupon.offer.name }}</b></span><span><small>QR ID</small><b>{{ result.coupon.coupon_uid }}</b></span><span><small>Redeemed</small><b>{{ result.coupon.redeemed_at|clinic_time('%d %b %Y, %I:%M %p') }} IST</b></span></div>
-  {% elif result.kind == 'REDEEMED' %}
-    <span class="eyebrow">REDEMPTION BLOCKED</span><h2>OFFER ALREADY USED</h2><p><b>{{ result.coupon.patient.full_name }}</b> used this offer on {{ result.coupon.redeemed_at|clinic_time('%d %b %Y, %I:%M %p') }} IST. This QR cannot be used again.</p>
-  {% elif result.kind == 'EXPIRED' %}
-    <span class="eyebrow">OFFER EXPIRED</span><h2>OFFER EXPIRED</h2><p>The offer expired on {{ result.coupon.expires_at|clinic_time('%d %b %Y') }} and can no longer be redeemed.</p>
-  {% elif result.kind == 'CANCELLED' %}
-    <span class="eyebrow">OFFER CANCELLED</span><h2>OFFER CANCELLED</h2><p>This offer is no longer valid and cannot be redeemed.</p>
-  {% else %}
-    <span class="eyebrow">VALIDATION FAILED</span><h2>INVALID QR</h2><p>{{ result.message }}</p>
-  {% endif %}
-  </div>
-</section>
-{% endif %}
 <script src="https://unpkg.com/html5-qrcode" defer></script>
 <script>
 window.addEventListener('load', () => {

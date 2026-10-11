@@ -1,0 +1,6 @@
+# Extra packages needed only to run the test suite, on top of the application's own.
+#   pip install -r requirements-dev.txt
+-r requirements.txt
+# Decodes QR images, so a test can read back the actual PNG and prove its payload is the
+# opaque token and nothing else (tests/test_qr_print_privacy.py). Not used by the app.
+zxing-cpp>=2.2,<4

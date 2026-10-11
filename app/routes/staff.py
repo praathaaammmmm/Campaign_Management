@@ -10,7 +10,7 @@ from ..audit_service import audit
 from ..auth import require_staff
 from ..beneficiary_categories import SELECTABLE_CATEGORIES
 from ..query_params import optional_int
-from ..qr.service import find_coupon, redeem_atomic, refresh_expiry, result_for
+from ..qr.service import find_coupon, record_detail_view, redeem_atomic, refresh_expiry, result_for
 from ..models import AuditLog, Campaign, Patient, PatientOffer
 from ..config import VALIDATION_RATE_LIMIT_ATTEMPTS, VALIDATION_RATE_LIMIT_WINDOW_SECONDS
 from ..security import client_key, is_rate_limited, record_rate_limit_event, require_csrf
@@ -291,6 +291,7 @@ def validate_submit(request: Request, token: str = Form(...), _csrf: None = Depe
                 audit(db, request.session["user"], "QR_EXPIRED", coupon.id, coupon.patient_id)
             result = result_for(coupon)
             audit(db, request.session["user"], "QR_VALIDATED", coupon.id, coupon.patient_id, {"result": result["kind"]})
+            record_detail_view(db, request, result)
         db.commit()
         return request.app.state.templates.TemplateResponse(request, "validate.html", _context(
             request, result=result, token="", form_action="/staff/validate", back_url="/staff/home",
@@ -311,11 +312,12 @@ def validation_result(request: Request, coupon_uid: str):
         if not coupon:
             return RedirectResponse("/staff/validate", status_code=303)
         refresh_expiry(coupon, utc_now())
-        db.commit()
         result = result_for(coupon)
         if result["kind"] == "REDEEMED" and request.session.get("just_redeemed") == coupon.coupon_uid:
             request.session.pop("just_redeemed", None)
             result = {"kind": "JUST_REDEEMED", "coupon": coupon}
+        record_detail_view(db, request, result)
+        db.commit()
         return request.app.state.templates.TemplateResponse(request, "validate.html", _context(
             request, result=result, token="", form_action="/staff/validate", back_url="/staff/home",
             redeem_url=f"/staff/patients/{coupon.patient_id}/redeem",
