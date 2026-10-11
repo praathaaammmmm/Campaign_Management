@@ -1,24 +1,43 @@
-# Smriti Raj Dentistry — Patient-Specific QR Offer Management System
+# Smriti Raj Dentistry — QR Campaign Management
 
-A local FastAPI + SQLite prototype for campaign registrations and patient-specific complimentary offers.
+FastAPI application for registering campaign patients, issuing secure QR offers, managing clinic staff, and redeeming offers at the clinic.
 
-## Offers
-1. Free In-House Zirconia Crown
-2. Free In-House Aligner Scan
+It supports SQLite for local development and PostgreSQL for deployment.
 
-Each registration creates:
-- a patient record
-- exactly one selected offer
-- a unique opaque `SRD-...` secure token
-- a unique QR image
-- a 10-day server-time expiry
-- a one-time-use state stored in the database
+## What it does
 
-The QR payload contains only the secure token; patient information is not embedded in the QR.
+- Creates patient registrations and one QR coupon per registration.
+- Allows deliberate repeat registrations while protecting against accidental recent duplicates.
+- Generates QR images on demand from the signed coupon token, without permanent QR-file storage.
+- Supports any practical number of services per campaign. Admins can add, remove, and re-add services without rewriting historical registrations.
+- Lets admins assign one or more campaigns to staff. Those assignments scope staff registration, patient lists, and patient-detail access.
+- Lets any authenticated staff member validate and redeem a valid QR, so reception staff can handle patients registered by another staff member.
+- Shows full patient details only after an authenticated QR scan; the QR itself contains no patient data.
+- Provides campaign-aware admin dashboards, lists, CSV exports, delivery activity, and audit logs.
+- Uses n8n for actual email/WhatsApp delivery dispatch.
 
-## Windows setup
+## QR and privacy model
 
-Open PowerShell in this project folder:
+The QR payload is an opaque signed token in the form `SRD-<coupon-id>.<signature>`. It contains no name, mobile number, email address, URL, or other patient data.
+
+- Logged-out visitors cannot access QR validation, QR images, downloads, or printable coupons.
+- Authenticated staff and admins can validate and redeem valid QR offers.
+- Expired and cancelled QR codes cannot be redeemed.
+- The printable coupon contains campaign/service/coupon information only, not patient details.
+- Successful patient-detail views and redemptions are recorded in the audit log.
+
+## Local setup
+
+### Linux / Arch
+
+```bash
+cd /home/pratham/Dental_QR
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+### Windows PowerShell
 
 ```powershell
 py -m venv .venv
@@ -27,237 +46,137 @@ py -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Generate secure admin/clinic-login values:
+Generate secure administrator credentials, then copy the generated values into `.env`:
 
-```powershell
-py scripts/create_clinic_credentials.py
+```bash
+.venv/bin/python scripts/create_clinic_credentials.py
 ```
 
-Copy the generated values into `.env`. Never commit `.env` or paste the real password into source code or chat.
+Never commit `.env`, database files, backups, or real passwords.
 
-Then run:
+## Database migrations and startup
 
-```powershell
-py -m uvicorn app.main:app --reload
+Always apply migrations before starting an existing local database:
+
+```bash
+.venv/bin/python -m alembic upgrade head
 ```
 
-Open:
+For a new or important local database, make a copy before migrating:
 
-```text
-http://127.0.0.1:8000
+```bash
+cp smritiraj.db smritiraj.db.before-migration.backup
+.venv/bin/python -m alembic upgrade head
 ```
 
-API docs:
+Start the local server:
 
-```text
-http://127.0.0.1:8000/docs
+```bash
+.venv/bin/python -m uvicorn app.main:app --reload --port 8001
 ```
 
-## Authentication and account setup
+Open [http://127.0.0.1:8001](http://127.0.0.1:8001). API documentation is at [http://127.0.0.1:8001/docs](http://127.0.0.1:8001/docs).
 
-The application has one shared login page at `/login`. It accepts either an administrator account or an active staff account, then automatically sends the user to the appropriate workspace.
+`alembic stamp` is only for an already-existing unversioned database whose exact schema version is known. Do not use it on a production database without a backup and a reviewed migration plan.
 
-### Administrator account
+## Roles and access
 
-This is the single administrator account for the Admin CRM, campaign management, analytics, staff management, and other admin-only functions. Its credentials come only from the environment:
+### Admin
 
-- `CLINIC_USERNAME`
-- `CLINIC_PASSWORD_HASH` (an Argon2 hash)
+The environment-configured administrator can manage campaigns, services, staff, assignments, reporting, exports, audit logs, and all patient records.
 
-Use `py scripts/create_clinic_credentials.py` to generate the values, then place them in the local `.env` file or your deployment environment. The default username is `smritiraj-clinic`. This account is not stored in `staff_users`.
+### Staff
 
-### Staff accounts
+Staff accounts are created by an admin. A staff member with no campaign assignment cannot register patients or see campaign patient lists. Assignments take effect on the next request; no re-login is needed.
 
-Hospital staff use the same `/login` page to enter the registration workspace, where they can register patients and validate or redeem QR offers. Their credentials are stored as Argon2 password hashes in the `staff_users` database table. An administrator creates and manages these accounts in **Admin CRM → Staff**.
+Campaign assignments restrict:
 
-## Development seed data
+- registration choices;
+- staff home metrics;
+- patient lists and direct patient-record access;
+- delivery resend actions.
 
-After the app has been started at least once:
+They do not restrict QR scanning: any authenticated staff member can validate and redeem any valid QR at reception.
 
-```powershell
-py seed.py
+## Core workflows
+
+### Campaign and service management
+
+Go to **Admin CRM → Campaigns** to create and manage campaigns. A campaign can have any practical number of services.
+
+- Adding a service makes it available for future registrations.
+- Removing a service stops future registrations only.
+- Existing registrations, QR coupons, redemptions, and reports remain unchanged.
+- Closed campaigns are immutable.
+
+### Patient registration
+
+1. Select an active campaign and an active service assigned to it.
+2. Enter patient details and register.
+3. The system creates a separate coupon and QR for the registration.
+4. If the same mobile, campaign, and service were registered recently, the UI asks for confirmation rather than silently creating an accidental duplicate.
+
+### QR validation and redemption
+
+1. An authenticated staff member opens **QR Scanner**.
+2. Scan or enter the opaque QR token.
+3. A valid QR shows the authorized patient, campaign, service, and validity details.
+4. Redeem once. A later scan shows the already-redeemed status and cannot redeem again.
+
+## Filters and exports
+
+Admins can filter the dashboard, patients, issued coupons, redemptions, delivery activity, and CSV exports by campaign. Relevant pages also support service, status, search, date, delivery channel, and delivery-status filters.
+
+Historical rows remain reachable when campaigns are closed or services are removed/deactivated. CSV exports neutralize spreadsheet formula prefixes to prevent formula injection when opened in Excel or Sheets.
+
+## n8n delivery
+
+FastAPI records durable delivery intents; the external delivery worker sends them to n8n. See [n8n/README.md](n8n/README.md) and [docs/blueprint/n8n-delivery-contract.md](docs/blueprint/n8n-delivery-contract.md) for setup and the callback contract.
+
+Scheduled jobs:
+
+```bash
+.venv/bin/python -m app.delivery_job
+.venv/bin/python -m app.expiry_job
+.venv/bin/python -m app.backup_job
 ```
 
-This adds clearly marked development test data:
-- Rahul Sharma — Zirconia Crown
-- Amit Kumar — Aligner Scan
-- Neha Singh — Zirconia Crown
+Run the delivery job once per minute in production-like environments. Run the expiry job every few minutes. SQLite backups are encrypted only when `BACKUP_ENCRYPTION_KEY` is configured; use managed PostgreSQL backups in production.
 
-## Complete workflow test
+## Testing
 
-1. Log in.
-2. Click **Register Patient**.
-3. Enter the patient information.
-4. Select exactly one offer.
-5. Click **REGISTER PATIENT & GENERATE QR**.
-6. The system stores the patient and offer and generates a unique QR.
-7. Download or print the QR.
-8. Go to **Scan / Validate QR**.
-9. Use the camera scanner where supported, or paste/type the token printed/generated for the QR.
-10. A valid active QR displays the patient and offer to the authenticated clinic user.
-11. Click **REDEEM OFFER** and confirm.
-12. Scan/validate the same token again. It must show **OFFER ALREADY USED**.
-13. Search the patient in **Patients**.
-14. Check **Offers** for the QR status.
+Run the normal suite from the repository root:
 
-## Security behavior
-
-- QR contains only an opaque cryptographically random token.
-- Patient name, mobile, email, age, etc. are never placed into the QR payload.
-- Validation is always server-side against SQLite.
-- Server-side UTC time controls the 10-day validity window.
-- Redemption uses a conditional database update requiring `status = ACTIVE` and `expires_at > now`.
-- Therefore, two simultaneous redemption requests cannot both transition the same coupon from ACTIVE to REDEEMED.
-- Secrets are loaded from environment variables and are not hard-coded into source.
-
-## Email and WhatsApp delivery (n8n)
-
-Actual email/WhatsApp sending is handled by n8n, not FastAPI directly — see
-[`n8n/README.md`](n8n/README.md) for the full setup guide (importing the workflow,
-credentials, dispatcher scheduling, and an end-to-end test checklist), and
-[`docs/blueprint/n8n-delivery-contract.md`](docs/blueprint/n8n-delivery-contract.md) for
-the payload/callback contract.
-
-Local prototype mode prepares/logs the intended email data and QR file; it does not require an email provider.
-
-Later, configure:
-
-```text
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USERNAME=
-SMTP_PASSWORD=
-SMTP_FROM=
+```bash
+.venv/bin/python -m pytest tests
 ```
 
-No SMTP credentials should be committed to source control.
+Use `pytest tests`, not bare `pytest`, if a nested local clone named `Dental_QR/` exists.
 
-## WhatsApp
+QR image decoding tests use the optional development dependency:
 
-The prototype does not use unofficial automation. It creates a prefilled `wa.me` link and records the action as prepared.
-
-For production, replace `app/whatsapp_service.py` with the official WhatsApp Business Cloud API integration and keep credentials in environment variables.
-
-## Important local-network note
-
-`127.0.0.1` works only on the same computer. If you want a phone/tablet at a campaign to access the local server over Wi-Fi, bind Uvicorn to the computer's LAN interface and use the computer's LAN IP as `PUBLIC_BASE_URL`. The QR in this prototype contains only the opaque token, so camera scanning can also be used as a token input.
-
-## Tests
-
-Run:
-
-```powershell
-py -m pytest -q
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
-## Encrypted SQLite backups
+The production requirements and deployment image do not install this development-only decoder.
 
-Backups never fall back to plaintext. Generate a local Fernet key once and put
-it in your uncommitted `.env` file:
+## Deployment
 
-```powershell
-py -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+Use PostgreSQL in deployment and run Alembic migrations as part of the release/start command:
+
+```bash
+alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-```text
-BACKUP_ENCRYPTION_KEY=<generated key>
-BACKUP_DIR=backups
-BACKUP_RETENTION_DAYS=30
-```
+See [RENDER_DEPLOY.md](RENDER_DEPLOY.md) for the current Render deployment configuration. Before an event, assign campaigns to the required staff accounts, verify n8n callbacks, check backups, and run a controlled load test.
 
-Run the scheduled job daily from Task Scheduler or the private worker:
+## Important repository hygiene
 
-```powershell
-py -m app.backup_job
-```
+Do not commit any of the following:
 
-The job snapshots SQLite safely, encrypts the artifact with Fernet, records a
-checksum of the encrypted file, and keeps the configured retention window.
-Keep the key outside the backup directory and copy encrypted artifacts to a
-separate protected location. The SQLite backup job intentionally refuses a
-non-SQLite database; use the managed PostgreSQL backup process after migration.
-
-## QR delivery dispatch and expiry sweep jobs
-
-Two more externally scheduled jobs, run the same way as the backup job:
-
-```powershell
-py -m app.delivery_job
-py -m app.expiry_job
-```
-
-`app.delivery_job` sends queued QR notifications (registration, manual resend, and
-retries) to n8n and must run every **1 minute** in production-like environments — it is
-the only place the app makes outbound delivery HTTP calls; registration and manual resend
-only ever write a durable `PREPARED` record. `app.expiry_job` expires stale QR offers and
-triggers 24–48h expiry reminders; running it every few minutes is sufficient. See
-`docs/blueprint/n8n-delivery-contract.md` for the full delivery payload/callback contract,
-required for whoever builds the actual n8n workflows.
-
-## Database migrations
-
-Local development may create SQLite tables automatically for convenience. Staging and production never create tables at application startup; apply Alembic migrations first:
-
-```powershell
-py -m alembic upgrade head
-```
-
-Check that the models and migrations agree:
-
-```powershell
-py -m alembic check
-```
-
-## Railway deployment preparation
-
-The repository includes a non-root production `Dockerfile`, PostgreSQL support, Alembic migrations, `/health` liveness, and `/ready` database readiness. Follow `docs/deployment-railway.md` when the deployment step is approved. Do not deploy with real patient data before the security, backup, pipeline, and launch gates pass.
-
-The test suite covers:
-- registration
-- QR token creation
-- uniqueness
-- 10-day expiry
-- valid QR
-- invalid QR
-- redemption
-- second redemption
-- different offers
-- patient search
-
-## Project structure
-
-```text
-smritiraj_qr_system/
-├── app/
-│   ├── main.py
-│   ├── config.py
-│   ├── database.py
-│   ├── models.py
-│   ├── schemas.py
-│   ├── auth.py
-│   ├── qr_service.py
-│   ├── coupon_service.py
-│   ├── email_service.py
-│   ├── whatsapp_service.py
-│   ├── audit_service.py
-│   ├── routes/
-│   │   ├── auth.py
-│   │   ├── dashboard.py
-│   │   ├── patients.py
-│   │   ├── coupons.py
-│   │   └── validation.py
-│   ├── templates/
-│   └── static/
-├── generated_qr/
-├── tests/
-├── .env.example
-├── .gitignore
-├── requirements.txt
-├── run.py
-├── seed.py
-└── README.md
-```
-
-## Production migration path
-
-The application is intentionally modular. SQLite can later be replaced with PostgreSQL by changing `DATABASE_URL`. SMTP and official WhatsApp Cloud API can be configured independently. Before public deployment, add HTTPS, stronger multi-user authentication/authorization, CSRF protection, rate limiting, encrypted backups, proper secrets management, and a privacy/retention policy appropriate for patient data.
+- `.env` or real credentials;
+- `smritiraj.db` or database backups;
+- `generated_qr/` legacy files;
+- editor backup files such as `*.save`;
+- nested local clones such as `Dental_QR/`.
