@@ -26,6 +26,10 @@ The QR payload is an opaque signed token in the form `SRD-<coupon-id>.<signature
 - The printable coupon contains campaign/service/coupon information only, not patient details.
 - Successful patient-detail views and redemptions are recorded in the audit log.
 
+`QR_SIGNING_KEY` is an environment secret and must be set independently in production. QR
+IDs are random, not sequential. Existing QR tokens are tied to the signing key used when
+they were issued, so rotating that key requires a reviewed QR reissue/key-rotation plan.
+
 ## Local setup
 
 ### Linux / Arch
@@ -141,7 +145,7 @@ Scheduled jobs:
 .venv/bin/python -m app.backup_job
 ```
 
-Run the delivery job once per minute in production-like environments. Run the expiry job every few minutes. SQLite backups are encrypted only when `BACKUP_ENCRYPTION_KEY` is configured; use managed PostgreSQL backups in production.
+Run the delivery job once per minute in production-like environments. Run the expiry job every few minutes. The SQLite backup job refuses to create a plaintext backup when `BACKUP_ENCRYPTION_KEY` is absent; use managed PostgreSQL backups in production.
 
 ## Testing
 
@@ -170,6 +174,18 @@ alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 See [RENDER_DEPLOY.md](RENDER_DEPLOY.md) for the current Render deployment configuration. Before an event, assign campaigns to the required staff accounts, verify n8n callbacks, check backups, and run a controlled load test.
+
+## Launch gates and known follow-up work
+
+Before a production event, verify HTTPS, production secrets, PostgreSQL, encrypted backups,
+n8n callbacks, staff campaign assignments, and a controlled load test. Redemption has true
+parallel PostgreSQL coverage: one redemption and one audit event must win per coupon. The
+scheduled expiry sweep also conditionally expires only active coupons, preserving concurrent
+cancellations.
+
+Remaining follow-up work includes moving expiry reminders into the durable delivery outbox,
+a documented QR key-rotation/reissue plan before changing `QR_SIGNING_KEY`, rate-limit
+hardening, pagination for large all-campaign lists, and event-scale load testing.
 
 ## Important repository hygiene
 

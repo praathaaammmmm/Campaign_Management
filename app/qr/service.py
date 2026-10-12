@@ -113,24 +113,58 @@ def record_detail_view(db: Session, request, result: dict) -> bool:
     return True
 
 
-def refresh_expiry(coupon: PatientOffer, now: datetime) -> bool:
-    if coupon.status == "ACTIVE" and now >= coupon.expires_at:
-        coupon.status = "EXPIRED"
-        return True
-    return False
+def refresh_expiry(db: Session, coupon: PatientOffer, now: datetime) -> bool:
+    """Request-time (lazy) expiry: mark a stale ACTIVE coupon EXPIRED. The caller commits.
 
-
-def redeem_atomic(db: Session, coupon_id: int, redeemed_by: str, now: datetime):
-    # Conditional UPDATE makes ACTIVE -> REDEEMED a single atomic state transition.
-    stmt = (
+    The change is a conditional UPDATE, not a write of the loaded object, so it only lands
+    if the row is still ACTIVE at that moment. A coupon cancelled or redeemed by another
+    request in the meantime is left exactly as it is; either way ``coupon`` is reloaded,
+    so the caller classifies the state the database actually holds. Returns True only
+    when this call changed the row.
+    """
+    if coupon.status != "ACTIVE" or now < coupon.expires_at:
+        return False
+    changed = db.execute(
         update(PatientOffer)
         .where(
-            PatientOffer.id == coupon_id,
+            PatientOffer.id == coupon.id,
             PatientOffer.status == "ACTIVE",
-            PatientOffer.expires_at > now,
+            PatientOffer.expires_at <= now,
         )
-        .values(status="REDEEMED", redeemed_at=now, redeemed_by=redeemed_by)
-    )
-    result = db.execute(stmt)
-    db.commit()
-    return result.rowcount == 1
+        .values(status="EXPIRED")
+        .execution_options(synchronize_session=False)
+    ).rowcount == 1
+    db.refresh(coupon)
+    return changed
+
+
+def redeem_atomic(db: Session, coupon_id: int, redeemed_by: str, now: datetime) -> bool:
+    """Redeem a coupon and audit it as one transaction. Shared by the admin and staff
+    redemption routes, so the rule can never drift between them.
+
+    A conditional UPDATE makes ACTIVE -> REDEEMED a single atomic state transition: of any
+    number of simultaneous attempts on one unexpired coupon, exactly one changes the row.
+    Only that winner writes the ``QR_REDEEMED`` audit event, in the same transaction, and
+    commits once -- the redemption and its audit row are saved together or not at all. A
+    losing or repeated attempt changes nothing, writes no audit event and returns False.
+    """
+    try:
+        redeemed = db.execute(
+            update(PatientOffer)
+            .where(
+                PatientOffer.id == coupon_id,
+                PatientOffer.status == "ACTIVE",
+                PatientOffer.expires_at > now,
+            )
+            .values(status="REDEEMED", redeemed_at=now, redeemed_by=redeemed_by)
+            .returning(PatientOffer.patient_id)
+        ).first()
+        if redeemed is None:
+            db.rollback()
+            return False
+        audit(db, redeemed_by, "QR_REDEEMED", coupon_id, redeemed.patient_id)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise

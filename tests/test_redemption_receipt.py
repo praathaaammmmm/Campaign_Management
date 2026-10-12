@@ -1,5 +1,7 @@
+import pytest
+
 from app.database import SessionLocal
-from app.models import PatientOffer
+from app.models import AuditLog, PatientOffer
 from app.qr.service import redeem_atomic
 from app.time_utils import utc_now
 from tests.test_staff_interface import _login_as_staff
@@ -80,7 +82,9 @@ def test_admin_redemption_receipt_then_later_scan_is_already_used(client):
     assert "Offer redeemed successfully" not in later_response.text
 
 
-def test_redeem_atomic_rejects_a_second_concurrent_redemption(client):
+def test_redeem_atomic_rejects_a_repeated_sequential_redemption(client):
+    """Sequential, single-session coverage only. Truly simultaneous redemptions are covered
+    on PostgreSQL by tests/test_redemption_concurrency.py."""
     db = SessionLocal()
     try:
         from app.models import Campaign, Offer, Patient
@@ -110,5 +114,33 @@ def test_redeem_atomic_rejects_a_second_concurrent_redemption(client):
         assert first is True
         assert second is False
         assert db.get(PatientOffer, coupon_id).redeemed_by == "staff-one"
+        # The winner's audit event is written by the same call; the repeat adds none.
+        [event] = db.query(AuditLog).filter_by(action="QR_REDEEMED").all()
+        assert (event.user, event.coupon_id, event.patient_id) == ("staff-one", coupon_id, patient.id)
+    finally:
+        db.close()
+
+
+def test_redemption_is_rolled_back_when_its_audit_event_cannot_be_written(client, monkeypatch):
+    """The state change and its audit event share one transaction: no audit, no redemption."""
+    client.post("/patients/register", data=registration("Atomic Audit Patient", "9888800005"))
+    db = SessionLocal()
+    try:
+        coupon_id = db.query(PatientOffer).one().id
+
+        def failing_audit(*args, **kwargs):
+            raise RuntimeError("audit unavailable")
+
+        monkeypatch.setattr("app.qr.service.audit", failing_audit)
+        with pytest.raises(RuntimeError):
+            redeem_atomic(db, coupon_id, "staff-one", utc_now())
+        monkeypatch.undo()
+
+        coupon = db.get(PatientOffer, coupon_id)
+        assert (coupon.status, coupon.redeemed_at, coupon.redeemed_by) == ("ACTIVE", None, None)
+        assert db.query(AuditLog).filter_by(action="QR_REDEEMED").count() == 0
+        # Nothing is left half-done: the same coupon can still be redeemed normally.
+        assert redeem_atomic(db, coupon_id, "staff-one", utc_now()) is True
+        assert db.query(AuditLog).filter_by(action="QR_REDEEMED").count() == 1
     finally:
         db.close()
