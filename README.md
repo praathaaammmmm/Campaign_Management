@@ -1,4 +1,4 @@
-# Smriti Raj Dentistry — QR Campaign Management
+# QR Campaign Management
 
 FastAPI application for registering campaign patients, issuing secure QR offers, managing clinic staff, and redeeming offers at the clinic.
 
